@@ -1,26 +1,53 @@
-# Makarov Physics Sandbox → 3D People Playground (working title)
+# Makarov Physics Sandbox (working title)
 
 A 3D rigid-body physics engine and sandbox written in **pure C#** — no physics, math or
 windowing libraries. WinForms host, hand-written OpenGL renderer (P/Invoke to `opengl32`),
 hand-written constraint solver.
 
-The project is pivoting from "a physics sandbox" (a toy with no goal, a crowded and
-commercially dead genre) into a **3D People Playground-style game**: a physics
-experimentation sandbox whose product is the *matrix of interactions* between several
-simulation systems, with a hurtable, dismemberable humanoid ragdoll as the canvas.
+**Product direction:** a **3D physics sandbox about building chaotic physical experiments
+and chain reactions** — a toy/game, not an educational lab, CAD tool, or engineer's
+simulator. Working logline:
+
+> *3D physics sandbox about building chaotic contraptions and watching them fall apart.*
+
+People Playground is **market proof** (a solo/micro-studio physics sandbox can sell ~3M
+copies), **not a template**. The lesson taken from it is the *loop*, not "2D gore":
+
+> place an object → trigger a reaction → get a funny / destructive / unexpected result →
+> want to do it again differently.
+
+We deliberately stand **beside** People Playground, not head-on against it: a **3D
+contraption / destruction sandbox**, same audience, different promise. Gore is *optional
+and not the hook* — the cast can be **crash-test dummies, robots, blocks, vehicles,
+machines**, which both widens the audience (lower age rating, more streamable) and avoids
+being "just another PP clone".
+
+> **Note on the ragdoll work:** the articulated ragdoll (joints + pose muscles + damage +
+> dismemberment) is **the same tech** a crash-test dummy or a robot-that-falls-apart needs.
+> Moving to the dummy/destruction framing is a **reskin** (mesh + damage feedback + Steam
+> positioning), **not a rewrite**. The systems below carry over unchanged.
+
+**Product axis for filtering every future task:** *not "an engine with lots of features",
+but "a game where the player builds physical catastrophes".* Material system? Yes — players
+read "glass breaks, rubber bounces, metal sinks". Triggers? Yes — they make chain reactions.
+Fullscreen release mode? Yes — a Steam player must never see the WinForms editor. Force
+graphs / educational explainers? Not now — that is a separate branch.
 
 ---
 
 ## Two build modes (design intent)
 
-The WinForms application — with all its menus, toolbar, property panels, gizmos, presets,
-challenges and the editor tools — is the **editor / authoring build**. It exists for *our*
-convenience: building scenes, tuning, debugging.
+The WinForms application — menus, toolbar, property panels, gizmos, presets, challenges,
+the editor tools — is the **dev / editor shell**. It exists for *our* convenience and is
+**not** what a player should ever see.
 
-The **release build** ships only the **fullscreen game scene** (no menus, no toolbar, no
-property panels) — you spawn into a scene and play. The plan is a single startup switch
-(build flag or launch argument) that boots straight into a borderless fullscreen `GlPanel`
-with the editor chrome suppressed.
+- **Dev / editor build:** WinForms chrome, property panels, debug tools, scene editing,
+  presets, internal utilities, this README.
+- **Release build:** **fullscreen scene**, minimal HUD, a player-friendly radial / tool
+  menu, clean controls — no visible "WinForms feeling", no engineering-panel hell.
+
+The plan is a single startup switch (build flag or launch argument) that boots straight
+into a borderless fullscreen `GlPanel` with the editor chrome suppressed.
 
 *Status:* not implemented yet. Today there is an `F11` fullscreen toggle and `F4` panel
 toggle; the release-mode boot path is a later task (see Roadmap → M2/M3).
@@ -82,27 +109,29 @@ density/friction/bounciness/colour/breakability), not hard engine material types
 
 ---
 
-## Where we're going: 3D People Playground
+## What makes it a game (not a toy): the loop + the matrix
 
-**The product is not the ragdoll and not "lots of items". It is the interaction matrix
-between several simulation systems.** Selling examples (People Playground, ~3M copies as a
-solo/micro-studio title) all share three things, and a bare sandbox has none of them:
+A bare sandbox is a toy with no reason to buy it. Two things turn it into a product:
 
-1. **A sharp identity / hook** (not "physics in general").
-2. **Controllable, reactive "toys"** — above all a humanoid that holds together, reacts,
-   bleeds, dies, can be revived — not just falling boxes.
-3. **A creation + sharing loop** (Workshop / share contraptions).
+**1. The core loop.** Place → trigger → surprising result → repeat differently. Every
+feature is judged by whether it tightens this loop. The "surprising result" comes from
+**emergent interactions**, which is the second thing:
 
-Our **differentiator is 3D**, where the genre leaders are 2D — and our **moat is the
-from-scratch engine** (no Unity PhysX black box; deterministic-friendly, fully ours).
+**2. The interaction matrix.** The product is not any single object — it is the *matrix of
+interactions* between simulation systems. Fire × flammable, current × conductor, current ×
+water, blade × joint, blast × durability, impact × fragile. Each filled cell is an emergent
+moment the player didn't expect. **Design that table first; it is the game design.**
 
-The emergent "magic" comes from filling in the **verb x material-property matrix**:
-fire x flammable, current x conductor, current x water-on-floor, blade x joint,
-blast x durability, ... Each filled cell is an emergent moment. **Design that table first.**
+Our **differentiator is 3D** (genre leaders are 2D) and our **moat is the from-scratch
+engine** (no Unity PhysX black box; deterministic-friendly, fully ours — spatial chain
+reactions and contraptions that read better in 3D).
 
-A 3D-specific marketing pillar: **shareable cinematic clips**. People Playground spreads
-through clips — so camera, slow-mo and "looks good in 3D" are first-class concerns, not
-afterthoughts.
+**Vertical-slice discipline:** the cast list (dummies / robots / blocks / vehicles /
+machines) is a *menu, not a focus*. The first trailer-worthy slice needs **one sharp hook
+and one verb** — pick a single fantasy and make *that* feel great before fanning out.
+
+A 3D-specific marketing pillar: **shareable cinematic clips**. Sandboxes of this kind spread
+through clips — so camera, slow-mo and "looks good in 3D" are first-class, not afterthoughts.
 
 ---
 
@@ -131,19 +160,29 @@ afterthoughts.
 **Done**
 - Full rigid-body engine, renderer, editor, presets/challenges/campaign, save/load (above).
 
-**In progress (M0)**
-- `Ragdoll.cs`: humanoid built from boxes + sphere + `Point` joints; **pose muscles**
-  (per-joint angular drives holding the spawn pose); **damage** fed from the world
-  `Impacts` channel (balls, blasts, falls all hurt for free); **dismemberment** (a bone at
-  0 HP severs its joints); **death** (killing head/torso drops the body limp). Render tint:
-  skin reddens with damage, brief emissive flash on hit, dims when dead.
-- Spawn with the **`0`** key (drops a ragdoll at the floor point under the cursor).
+**In progress**
+- **M0 — Ragdoll** (`Ragdoll.cs`): humanoid from boxes + sphere + `Point` joints; **pose
+  muscles** (per-joint angular drives holding the spawn pose, now stiffer so it stays
+  together when dragged); **death** + **dismemberment**. Damage from the world `Impacts`
+  channel is now **blunt only** — capped, cooldowned, and floored, so falls and dragging
+  bruise (redden) but never tear the body apart. Severing/killing is reserved for
+  deliberate weapons via `RagdollSystem.DamageBone(..., sever-capable)`. Spawn via the
+  toolbar **Ragdoll** button (icon, click-to-place) or the **`0`** key (spawn at cursor).
+- **M1 — Fire/heat** (`Heat.cs`): per-body `Temperature` / `Burning` / `Flammability`
+  (Physics.cs). Burning bodies consume fuel, radiate heat to nearby flammable bodies,
+  ignite them past an ignition point, then char and burn out. Dense bodies (metal/stone)
+  resist via a density gate. **Fire damages burning ragdoll bones over time** (sever-capable)
+  — so a fire spreads bone-to-bone, cooks a vital part, and collapses the body, all
+  emergent. Igniter tool: toolbar **Ignite** button (torch icon) / **`I`** key → click a
+  body. Burning bodies glow and flicker; charred ones darken.
 
 **Next**
-- Tune ragdoll feel: muscle stiffness/strength per joint, upright strength, damage curve,
-  mass. Decide whether v1 should self-balance at all or just hold pose + flop convincingly.
-- Add a dedicated **hitscan weapon** (raycast -> `RagdollSystem.DamageBone`) and a blade.
-- Begin M1: material properties + fire.
+- Tune both feels (muscle gains, damage curve, fire spread/ignition rates).
+- Add the rest of M1: **electricity** (conductivity over the contact/connection graph) and
+  a **blade** verb (sever-capable on contact). Wire per-material `Flammability`/conductivity
+  into the material-preset table + properties panel + `.mpscene` serialization (currently
+  flammability is a body default gated by density; not yet saved/loaded or editable in the
+  panel). Then fill more of the interaction matrix.
 
 ---
 
@@ -176,17 +215,30 @@ afterthoughts.
 
   | verb \ property | flammable | conductive | wet | sharp-target | fragile |
   |---|---|---|---|---|---|
-  | fire    | ignite -> spread | — | resists/quench | — | — |
+  | fire    | **ignite -> spread (done)** | — | resists/quench | — | — |
   | current | — | propagate | jump through water | — | — |
   | blade   | — | — | — | sever joint | — |
   | blast   | ignite? | — | — | — | fracture |
-  | impact  | — | — | splash | wound | fracture |
+  | impact  | — | — | splash | **blunt bruise (done)** | fracture |
+
+  Also wired: **fire x ragdoll** (burning bones take damage, spread, can kill — emergent).
 
 ---
 
 ## Changelog
 
-- **(this pass)** Pivot direction documented (3D People Playground). Added `Ragdoll.cs`
+- **(pass 3)** *Direction refined* (no code change): positioned as a **3D chaos /
+  contraption / destruction sandbox** standing beside People Playground, not a gore clone;
+  documented the core loop, the editor-vs-release split detail, and the vertical-slice
+  "one hook / one verb" discipline. Noted that the ragdoll work is reused as crash-test
+  dummy / robot tech (reskin, not rewrite). Project now delivered as a single zip archive.
+- **(pass 2)** *Sturdier ragdoll*: impact damage is now blunt-only (capped, cooldowned,
+  health-floored, non-severing); muscles stiffened so it holds together when dragged.
+  *Toolbar*: added **Ragdoll** (`ragdoll.png`) and **Ignite** (`torch.png`) buttons in the
+  spawn / actions groups, both click-to-place; keys `0` (ragdoll) and `I` (ignite).
+  *M1 opened*: `Heat.cs` fire/heat system + per-body thermal fields on `RigidBody`; fire
+  ignites/spreads/chars and damages ragdoll bones.
+- **(pass 1)** Pivot direction documented (3D People Playground). Added `Ragdoll.cs`
   (humanoid, pose muscles, impact-driven damage, dismemberment, death, render tint) and the
   one-line `RigidBody.Tag`. Wired into `GlPanel`: per-frame update, `0`-key spawn, render
   tint, clear-on-`ClearDynamic`. README rewritten with full engine inventory + roadmap.

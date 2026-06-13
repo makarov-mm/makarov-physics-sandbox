@@ -9,7 +9,7 @@ namespace MakarovPhysicsSandbox;
 
 internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
 
-internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect }
+internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Ignite }
 
 
 internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller }
@@ -213,6 +213,9 @@ internal sealed partial class GlPanel : Control
     // ---- ragdolls (the 3D People Playground "toy"; see Ragdoll.cs) ----
     private readonly RagdollSystem _ragdolls = new();
 
+    // ---- fire / heat (first M1 interacting system; see Heat.cs) ----
+    private readonly HeatSystem _heat = new();
+
     // ---- lightweight feedback sounds / water-entry tracking ----
     private bool _soundEnabled = false;
     private double _nextImpactSound, _nextSplashSound, _nextExplosionSound;
@@ -319,6 +322,8 @@ internal sealed partial class GlPanel : Control
     public void Spawn(int kind) { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SpawnBody, kind); Focus(); } }
     public void SpawnPins()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.BowlingPins); Focus(); } }
     public void SpawnChain()    { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Chain); Focus(); } }
+    public void SpawnRagdoll()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ragdoll); Focus(); } }
+    public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
     public void Shoot()         { if (_initialized) { CancelPendingSceneAction(); ShootBall(); Focus(); } }
     public void Detonate()      { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Explosion); Focus(); } }
     public void Attractor()     { if (_initialized) { ToggleOrArmField(ForceField.Kind.Attract, PendingSceneActionKind.Attractor); Focus(); } }
@@ -508,6 +513,7 @@ internal sealed partial class GlPanel : Control
         SpawnEffectsFromWorld();
         UpdateParticles(simDt);
         _ragdolls.Update(simDt, _world);
+        _heat.Update(simDt, _world, _ragdolls);
         UpdateChallenge(simDt);
 
         RenderShadowPass();
@@ -661,7 +667,7 @@ internal sealed partial class GlPanel : Control
                 UpdateAim();
                 if (!ExecutePendingSceneAction())
                 {
-                    bool bodyTool = _pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect;
+                    bool bodyTool = _pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect or PendingSceneActionKind.Ignite;
                     StatusUpdated?.Invoke(bodyTool
                         ? PendingSceneActionInstruction()
                         : $"Click a valid point on the floor or on an object to place {PendingSceneActionLabel()}. Press Esc to cancel.");
@@ -731,6 +737,7 @@ internal sealed partial class GlPanel : Control
             case 0x38: CancelPendingSceneAction(); SpawnBody(8); break;              // 8 table
             case 0x39: CancelPendingSceneAction(); SpawnBowlingPins(); break;        // 9 bowling pins
             case 0x30: CancelPendingSceneAction(); SpawnRagdollAtAim(); break;        // 0 ragdoll
+            case 0x49: ArmSceneAction(PendingSceneActionKind.Ignite); break;          // I ignite (click a body)
             case 0x4C: CancelPendingSceneAction(); DropChain(); break;               // L  chain
             case 0x56: CancelPendingSceneAction(); ToggleWater(); break;             // V  water
             case 0x5A: CancelPendingSceneAction(); AddField(ForceField.Kind.Attract); break; // Z
@@ -1816,6 +1823,17 @@ internal sealed partial class GlPanel : Control
         if (_pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect)
             return ExecuteJointTool(_pendingSceneAction);
 
+        if (_pendingSceneAction == PendingSceneActionKind.Ignite)
+        {
+            var (o, dir2) = MouseRay(_lastMouseX, _lastMouseY);
+            var target = _world.RayCast(o, dir2, out _, out _);
+            if (target == null) return false;        // missed: stay armed, show the hint
+            _pendingSceneAction = PendingSceneActionKind.None;
+            _heat.Ignite(target);
+            NotifyStateChanged();
+            return true;
+        }
+
         if (!_aimValid) return false;
 
         var action = _pendingSceneAction;
@@ -1833,6 +1851,9 @@ internal sealed partial class GlPanel : Control
                 break;
             case PendingSceneActionKind.Chain:
                 DropChain();
+                break;
+            case PendingSceneActionKind.Ragdoll:
+                SpawnRagdollAtAim();
                 break;
             case PendingSceneActionKind.Explosion:
                 Explode();
@@ -1870,6 +1891,7 @@ internal sealed partial class GlPanel : Control
         },
         PendingSceneActionKind.BowlingPins => "bowling pins",
         PendingSceneActionKind.Chain => "chain",
+        PendingSceneActionKind.Ragdoll => "ragdoll",
         PendingSceneActionKind.Explosion => "explosion",
         PendingSceneActionKind.Attractor => "attractor",
         PendingSceneActionKind.Repeller => "repeller",
@@ -1877,6 +1899,7 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.Connect => "connect",
         PendingSceneActionKind.Spring => "spring",
         PendingSceneActionKind.Disconnect => "disconnect",
+        PendingSceneActionKind.Ignite => "ignite",
         _ => "tool",
     };
 
@@ -1885,6 +1908,7 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.Connect => "Connect: click first object, then click second object. Esc cancels.",
         PendingSceneActionKind.Spring => "Spring: click first object, then click second object. Esc cancels.",
         PendingSceneActionKind.Disconnect => "Disconnect: click an object to remove all its links/springs. Esc cancels.",
+        PendingSceneActionKind.Ignite => "Ignite: click an object to set it on fire. Esc cancels.",
         _ => $"Click inside the scene to place {PendingSceneActionLabel()}. Press Esc to cancel.",
     };
 
@@ -1963,6 +1987,7 @@ internal sealed partial class GlPanel : Control
         _world.Bodies.RemoveAll(b => !b.IsStatic);
         _particles.Clear();
         _ragdolls.Clear();
+        _heat.Clear();
         _waterTouchState.Clear();
         _triggers.Clear();
         ClearChallenge();
@@ -2787,6 +2812,13 @@ internal sealed partial class GlPanel : Control
             else
             {
                 GL.Uniform1(_uEmissive, 0f);
+            }
+
+            // Fire takes visual priority: a burning/glowing body overrides any other tint.
+            if (HeatSystem.TryTint(b, out var hotColor, out float hotGlow))
+            {
+                color = hotColor;
+                GL.Uniform1(_uEmissive, hotGlow);
             }
 
             GL.Uniform3(_uColor, color.X, color.Y, color.Z);

@@ -49,6 +49,7 @@ internal sealed class RagdollBone
     public bool Severed;          // joints already cut off from the body
 
     public float HitFlash;        // 0..1, decays - drives a brief emissive flash on damage
+    public float HitCooldown;     // seconds remaining before this bone can take another damage tick
 
     // --- reserved for later interaction systems (declared now so render + roadmap line up) ---
     public float Temperature = 20f;   // °C, for the fire/heat milestone
@@ -97,14 +98,23 @@ internal sealed class RagdollSystem
     private readonly List<Ragdoll> _ragdolls = new(8);
 
     // ---- damage tuning ----
-    private const float HurtSpeed = 3.0f;     // closing speed below this does no damage
-    private const float DamagePerSpeed = 9f;  // hp per (m/s) above the threshold
-    private const float HitRangePad = 0.18f;  // how far past a bone's radius an impact still counts
+    // Impact damage is BLUNT: it bruises (reddens) and knocks the body around but, on its
+    // own, can neither dismember nor kill - so ordinary falls and dragging never tear the
+    // ragdoll apart. Deliberate weapons (M1: blades, bullets, blasts) call DamageBone with
+    // canSever:true to actually take it apart.
+    private const float HurtSpeed = 7.0f;      // closing speed below this does no damage at all
+    private const float DamagePerSpeed = 2.5f; // hp per (m/s) above the threshold
+    private const float BluntDamageCap = 16f;  // most a single blunt impact can do
+    private const float BluntHealthFloor = 12f;// blunt damage can never push a bone below this
+    private const float HitCooldown = 0.18f;   // min seconds between damage ticks on one bone
+    private const float HitRangePad = 0.18f;   // how far past a bone's radius an impact still counts
 
     // ---- muscle tuning ----
-    private const float ChildShare = 0.85f;   // reaction split: child moves more than the parent
+    private const float ChildShare = 0.85f;    // reaction split: child moves more than the parent
     private const float ParentShare = 0.15f;
-    private const float MaxDeltaW = 6.0f;     // clamp per-bone angular-velocity change per step (rad/s)
+    private const float MaxDeltaW = 7.0f;      // clamp per-bone angular-velocity change per step (rad/s)
+    private const float MuscleStiffnessScale = 1.9f; // global convergence multiplier (holds pose when dragged)
+    private const float MuscleStrengthScale = 1.5f;  // global proportional-gain multiplier
 
     // Bones are tiny in volume; at density 1 a whole body would weigh less than a single
     // steel shot (density 4) and get launched by one pellet. This makes a humanoid weigh
@@ -132,9 +142,12 @@ internal sealed class RagdollSystem
 
         foreach (var rag in _ragdolls)
         {
-            // 2) Decay hit flashes.
+            // 2) Decay hit flashes and damage cooldowns.
             foreach (var bone in rag.Bones)
+            {
                 if (bone.HitFlash > 0f) bone.HitFlash = MathF.Max(0f, bone.HitFlash - dt * 3.0f);
+                if (bone.HitCooldown > 0f) bone.HitCooldown = MathF.Max(0f, bone.HitCooldown - dt);
+            }
 
             if (!rag.Alive) continue; // dead = limp, muscles off
 
@@ -172,14 +185,27 @@ internal sealed class RagdollSystem
                     if (d2 <= reach * reach && d2 < bestD2) { bestD2 = d2; hit = bone; }
                 }
             }
-            if (hit == null) continue;
+            if (hit == null || hit.HitCooldown > 0f) continue;
 
-            float dmg = (speed - HurtSpeed) * DamagePerSpeed;
-            DamageBone(hit, dmg, world);
+            float dmg = MathF.Min((speed - HurtSpeed) * DamagePerSpeed, BluntDamageCap);
+            BluntDamage(hit, dmg);
         }
     }
 
-    /// <summary>Public so a future hitscan weapon / blade / etc. can deal direct damage too.</summary>
+    /// <summary>Blunt trauma from a collision: bruises and flashes, knocks health down but
+    /// never below a floor, and never severs or kills. This is what falls, drags and being
+    /// hit by a thrown box do - they should rough the body up, not tear it apart.</summary>
+    private static void BluntDamage(RagdollBone bone, float amount)
+    {
+        if (bone.Severed || amount <= 0f) return;
+        bone.Health = MathF.Max(BluntHealthFloor, bone.Health - amount);
+        bone.HitFlash = 1f;
+        bone.HitCooldown = HitCooldown;
+        bone.Body.Wake();
+    }
+
+    /// <summary>Sever-capable damage for deliberate weapons (blades, bullets, blasts - M1).
+    /// Public so those systems can deal direct, lethal, dismembering damage.</summary>
     public void DamageBone(RagdollBone bone, float amount, PhysicsWorld world)
     {
         if (bone.Severed || amount <= 0f) return;
@@ -234,8 +260,8 @@ internal sealed class RagdollSystem
 
         // Desired relative angular velocity that closes the error, damped toward the parent's.
         var relW = child.AngularVelocity - parent.AngularVelocity;
-        var desired = rotVec * (m.Strength * m.ChildBone.HealthFrac); // weaker as the bone is hurt
-        var dW = (desired - relW) * Math.Clamp(m.Stiffness * dt, 0f, 1f);
+        var desired = rotVec * (m.Strength * MuscleStrengthScale * m.ChildBone.HealthFrac); // weaker as the bone is hurt
+        var dW = (desired - relW) * Math.Clamp(m.Stiffness * MuscleStiffnessScale * dt, 0f, 1f);
 
         // Clamp so a single step can never inject a spike.
         float len = dW.Length();
@@ -363,6 +389,7 @@ internal sealed class RagdollSystem
         body.Restitution = 0.05f;
         body.Breakable = false;      // bones are severed by health, not fractured into debris
         body.UserObject = true;      // still selectable / grabbable in the editor
+        body.Flammability = 1.0f;    // flesh burns readily (fire -> bone damage; see HeatSystem)
 
         var bone = new RagdollBone { Body = body, Name = name, Owner = rag, MaxHealth = hp, Health = hp, Vital = vital };
         body.Color = new Vector3(0.86f, 0.66f, 0.56f);

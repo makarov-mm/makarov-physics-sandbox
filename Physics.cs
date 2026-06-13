@@ -245,6 +245,11 @@ internal sealed class RigidBody
     // Optional gameplay back-reference (e.g. the RagdollBone this body belongs to). Physics never reads it.
     public object? Tag;
 
+    // ---- thermal state (read/written by HeatSystem; the solver ignores all of this) ----
+    public float Temperature = 20f;   // °C-ish; ambient is 20
+    public bool Burning;              // currently on fire
+    public float Flammability = 0.7f; // 0 = will never ignite. Also gated by density (metal/stone resist).
+
     // Optional toy destruction. Kept deliberately simple: fragile bodies are replaced
     // by a few smaller pieces when they take a hard enough impact.
     public bool Breakable;
