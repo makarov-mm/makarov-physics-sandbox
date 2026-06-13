@@ -80,7 +80,7 @@ internal sealed class Ragdoll
     public bool Alive = true;
 
     // ---- tunables (shared defaults; exposed so they can be tweaked live while tuning feel) ----
-    public const float UprightStrength = 2.2f;   // pelvis self-righting while alive (0 = no balancing)
+    public const float UprightStrength = 0.75f;   // pelvis self-righting while alive (0 = no balancing)
 
     public Vector3 Center => Pelvis.Body.Position;
 
@@ -102,24 +102,24 @@ internal sealed class RagdollSystem
     // own, can neither dismember nor kill - so ordinary falls and dragging never tear the
     // ragdoll apart. Deliberate weapons (M1: blades, bullets, blasts) call DamageBone with
     // canSever:true to actually take it apart.
-    private const float HurtSpeed = 7.0f;      // closing speed below this does no damage at all
-    private const float DamagePerSpeed = 2.5f; // hp per (m/s) above the threshold
-    private const float BluntDamageCap = 16f;  // most a single blunt impact can do
-    private const float BluntHealthFloor = 12f;// blunt damage can never push a bone below this
+    private const float HurtSpeed = 4.8f;      // closing speed below this does no damage at all
+    private const float DamagePerSpeed = 4.0f; // hp per (m/s) above the threshold
+    private const float BluntDamageCap = 24f;  // most a single blunt impact can do
+    private const float BluntHealthFloor = 6f;// blunt damage can never push a bone below this
     private const float HitCooldown = 0.18f;   // min seconds between damage ticks on one bone
     private const float HitRangePad = 0.18f;   // how far past a bone's radius an impact still counts
 
     // ---- muscle tuning ----
     private const float ChildShare = 0.85f;    // reaction split: child moves more than the parent
     private const float ParentShare = 0.15f;
-    private const float MaxDeltaW = 7.0f;      // clamp per-bone angular-velocity change per step (rad/s)
-    private const float MuscleStiffnessScale = 1.9f; // global convergence multiplier (holds pose when dragged)
-    private const float MuscleStrengthScale = 1.5f;  // global proportional-gain multiplier
+    private const float MaxDeltaW = 4.8f;      // clamp per-bone angular-velocity change per step (rad/s)
+    private const float MuscleStiffnessScale = 0.9f; // global convergence multiplier (holds pose when dragged)
+    private const float MuscleStrengthScale = 0.8f;  // global proportional-gain multiplier
 
     // Bones are tiny in volume; at density 1 a whole body would weigh less than a single
     // steel shot (density 4) and get launched by one pellet. This makes a humanoid weigh
     // a handful of units, so hits knock it around believably instead of into orbit.
-    private const float BoneDensity = 90f;
+    private const float BoneDensity = 38f;
 
     public int Count => _ragdolls.Count;
     public IReadOnlyList<Ragdoll> All => _ragdolls;
@@ -219,6 +219,25 @@ internal sealed class RagdollSystem
             bone.Health = 0f;
             SeverBone(bone, world);
             if (bone.Vital) Kill(bone.Owner);
+        }
+    }
+
+    /// <summary>Sever-capable radial damage for deliberate high-energy events such as explosions.
+    /// This gives the ragdoll a clear failure point without making ordinary falls lethal.</summary>
+    public void DamageInRadius(Vector3 center, float radius, float maxDamage, PhysicsWorld world)
+    {
+        if (radius <= 0f || maxDamage <= 0f) return;
+        foreach (var rag in _ragdolls)
+        {
+            foreach (var bone in rag.Bones)
+            {
+                if (bone.Severed) continue;
+                float reach = radius + bone.Body.BoundingRadius;
+                float d = Vector3.Distance(center, bone.Body.Position);
+                if (d > reach) continue;
+                float t = 1f - d / reach;
+                DamageBone(bone, maxDamage * t, world);
+            }
         }
     }
 
@@ -332,19 +351,19 @@ internal sealed class RagdollSystem
 
         // ---- bone layout, expressed relative to the pelvis centre (X right, Y up, Z fwd) ----
         // half-extents pick a roughly 1.5 m figure; tuned by eye, easy to change later.
-        var pelvis = Box(rag, world, "pelvis", pelvisCenter, new Vector3(0.14f, 0.11f, 0.09f), vital: false, hp: 120f);
-        var torso = Box(rag, world, "torso", pelvisCenter + new Vector3(0, 0.33f, 0), new Vector3(0.15f, 0.20f, 0.10f), vital: true, hp: 120f);
-        var head = Sphere(rag, world, "head", pelvisCenter + new Vector3(0, 0.72f, 0), 0.13f, vital: true, hp: 60f);
+        var pelvis = Box(rag, world, "pelvis", pelvisCenter, new Vector3(0.14f, 0.11f, 0.09f), vital: false, hp: 75f);
+        var torso = Box(rag, world, "torso", pelvisCenter + new Vector3(0, 0.33f, 0), new Vector3(0.15f, 0.20f, 0.10f), vital: true, hp: 80f);
+        var head = Sphere(rag, world, "head", pelvisCenter + new Vector3(0, 0.72f, 0), 0.13f, vital: true, hp: 38f);
 
-        var armUL = Box(rag, world, "armUpperL", pelvisCenter + new Vector3(0.24f, 0.36f, 0), new Vector3(0.05f, 0.14f, 0.05f), false, 70f);
-        var armLL = Box(rag, world, "armLowerL", pelvisCenter + new Vector3(0.24f, 0.07f, 0), new Vector3(0.045f, 0.13f, 0.045f), false, 60f);
-        var armUR = Box(rag, world, "armUpperR", pelvisCenter + new Vector3(-0.24f, 0.36f, 0), new Vector3(0.05f, 0.14f, 0.05f), false, 70f);
-        var armLR = Box(rag, world, "armLowerR", pelvisCenter + new Vector3(-0.24f, 0.07f, 0), new Vector3(0.045f, 0.13f, 0.045f), false, 60f);
+        var armUL = Box(rag, world, "armUpperL", pelvisCenter + new Vector3(0.24f, 0.36f, 0), new Vector3(0.05f, 0.14f, 0.05f), false, 45f);
+        var armLL = Box(rag, world, "armLowerL", pelvisCenter + new Vector3(0.24f, 0.07f, 0), new Vector3(0.045f, 0.13f, 0.045f), false, 40f);
+        var armUR = Box(rag, world, "armUpperR", pelvisCenter + new Vector3(-0.24f, 0.36f, 0), new Vector3(0.05f, 0.14f, 0.05f), false, 45f);
+        var armLR = Box(rag, world, "armLowerR", pelvisCenter + new Vector3(-0.24f, 0.07f, 0), new Vector3(0.045f, 0.13f, 0.045f), false, 40f);
 
-        var legUL = Box(rag, world, "legUpperL", pelvisCenter + new Vector3(0.09f, -0.33f, 0), new Vector3(0.07f, 0.19f, 0.07f), false, 90f);
-        var legLL = Box(rag, world, "legLowerL", pelvisCenter + new Vector3(0.09f, -0.78f, 0), new Vector3(0.06f, 0.20f, 0.06f), false, 80f);
-        var legUR = Box(rag, world, "legUpperR", pelvisCenter + new Vector3(-0.09f, -0.33f, 0), new Vector3(0.07f, 0.19f, 0.07f), false, 90f);
-        var legLR = Box(rag, world, "legLowerR", pelvisCenter + new Vector3(-0.09f, -0.78f, 0), new Vector3(0.06f, 0.20f, 0.06f), false, 80f);
+        var legUL = Box(rag, world, "legUpperL", pelvisCenter + new Vector3(0.09f, -0.33f, 0), new Vector3(0.07f, 0.19f, 0.07f), false, 58f);
+        var legLL = Box(rag, world, "legLowerL", pelvisCenter + new Vector3(0.09f, -0.78f, 0), new Vector3(0.06f, 0.20f, 0.06f), false, 52f);
+        var legUR = Box(rag, world, "legUpperR", pelvisCenter + new Vector3(-0.09f, -0.33f, 0), new Vector3(0.07f, 0.19f, 0.07f), false, 58f);
+        var legLR = Box(rag, world, "legLowerR", pelvisCenter + new Vector3(-0.09f, -0.78f, 0), new Vector3(0.06f, 0.20f, 0.06f), false, 52f);
 
         rag.Pelvis = pelvis;
 

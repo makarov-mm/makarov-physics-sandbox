@@ -162,22 +162,27 @@ through clips — so camera, slow-mo and "looks good in 3D" are first-class, not
 
 **In progress**
 - **M0 — Ragdoll** (`Ragdoll.cs`): humanoid from boxes + sphere + `Point` joints; **pose
-  muscles** (per-joint angular drives holding the spawn pose, now stiffer so it stays
-  together when dragged); **death** + **dismemberment**. Damage from the world `Impacts`
-  channel is now **blunt only** — capped, cooldowned, and floored, so falls and dragging
-  bruise (redden) but never tear the body apart. Severing/killing is reserved for
-  deliberate weapons via `RagdollSystem.DamageBone(..., sever-capable)`. Spawn via the
-  toolbar **Ragdoll** button (icon, click-to-place) or the **`0`** key (spawn at cursor).
+  muscles** (per-joint angular drives holding the spawn pose, now deliberately softer).
+  The first tuning pass made the ragdoll too rigid/heavy; this pass lowers bone density,
+  lowers bone HP, weakens upright self-righting, and reduces global muscle gain so it reacts
+  more like a crash-test dummy instead of a welded mannequin. Damage from the world
+  `Impacts` channel is still **blunt only** — capped, cooldowned, and floored, so ordinary
+  falls and dragging bruise/redden without randomly amputating. Deliberate high-energy
+  verbs now have their own lethal path: explosions call `RagdollSystem.DamageInRadius(...)`
+  and fire calls `DamageBone(...)` over time. Spawn via the toolbar **Ragdoll** button
+  (icon, click-to-place) or the **`0`** key (spawn at cursor).
 - **M1 — Fire/heat** (`Heat.cs`): per-body `Temperature` / `Burning` / `Flammability`
   (Physics.cs). Burning bodies consume fuel, radiate heat to nearby flammable bodies,
   ignite them past an ignition point, then char and burn out. Dense bodies (metal/stone)
-  resist via a density gate. **Fire damages burning ragdoll bones over time** (sever-capable)
-  — so a fire spreads bone-to-bone, cooks a vital part, and collapses the body, all
-  emergent. Igniter tool: toolbar **Ignite** button (torch icon) / **`I`** key → click a
-  body. Burning bodies glow and flicker; charred ones darken.
+  resist via a density gate, but **ragdoll bones bypass that density gate** because their
+  high physics density is only there for solver stability. Fire now lasts long enough to
+  read visually, damages burning ragdoll bones over time, and has simple rising flame
+  particles in `Core.cs` so the ignite tool has immediate feedback. Igniter tool: toolbar
+  **Ignite** button (torch icon) / **`I`** key → click a body.
 
 **Next**
-- Tune both feels (muscle gains, damage curve, fire spread/ignition rates).
+- Build and run locally, then do a hands-on feel pass: tune `BoneDensity`, muscle gain,
+  blunt impact threshold, fire damage and fuel until one ragdoll is fun for five minutes.
 - Add the rest of M1: **electricity** (conductivity over the contact/connection graph) and
   a **blade** verb (sever-capable on contact). Wire per-material `Flammability`/conductivity
   into the material-preset table + properties panel + `.mpscene` serialization (currently
@@ -227,6 +232,11 @@ through clips — so camera, slow-mo and "looks good in 3D" are first-class, not
 
 ## Changelog
 
+- **(pass 4)** *Ragdoll/fire tuning pass*: ragdoll is less welded and less massive
+  (`BoneDensity` down, muscle/upright gains down, per-bone HP down); explosions now apply
+  explicit sever-capable radial damage to ragdoll bones; fire no longer gets suppressed by
+  the ragdoll density gate, burns longer, deals meaningful per-bone damage, and spawns
+  visible flame particles so the Ignite tool reads immediately.
 - **(pass 3)** *Direction refined* (no code change): positioned as a **3D chaos /
   contraption / destruction sandbox** standing beside People Playground, not a gore clone;
   documented the core loop, the editor-vs-release split detail, and the vertical-slice

@@ -511,9 +511,10 @@ internal sealed partial class GlPanel : Control
         float simDt = _paused ? 0f : (_slowMo ? dt * 0.2f : dt);
         UpdateTriggers(simDt);
         SpawnEffectsFromWorld();
-        UpdateParticles(simDt);
         _ragdolls.Update(simDt, _world);
         _heat.Update(simDt, _world, _ragdolls);
+        SpawnFireEffects(simDt);
+        UpdateParticles(simDt);
         UpdateChallenge(simDt);
 
         RenderShadowPass();
@@ -843,6 +844,9 @@ internal sealed partial class GlPanel : Control
         _world.Fields.Clear();
         _world.Waters.Clear();
         _particles.Clear();
+        _ragdolls.Clear();
+        _heat.Clear();
+        _waterTouchState.Clear();
         _triggers.Clear();
         _world.Grabbed = null;
         _zeroG = false;
@@ -1757,6 +1761,7 @@ internal sealed partial class GlPanel : Control
     {
         if (!_aimValid) return;
         _world.ApplyExplosion(_aimPoint, radius: 5f, strength: 9f);
+        _ragdolls.DamageInRadius(_aimPoint, 5f, 130f, _world);
         SpawnExplosionFeedback(_aimPoint, 5f);
         PlayExplosionSound();
     }
@@ -2242,6 +2247,39 @@ internal sealed partial class GlPanel : Control
                 Size = 0.07f,
                 Gravity = false,
             });
+        }
+    }
+
+    private void SpawnFireEffects(float dt)
+    {
+        if (dt <= 0f) return;
+
+        // Lightweight visual confirmation for the HeatSystem. Without this, fire only
+        // changed body tint, which read as "not working" unless you looked closely.
+        foreach (var b in _world.Bodies)
+        {
+            if (!b.Burning) continue;
+
+            int count = b.Tag is RagdollBone ? 2 : 1;
+            for (int i = 0; i < count && _particles.Count < MaxParticles; i++)
+            {
+                if (_rng.NextDouble() > 10.0 * dt) continue;
+                var jitter = RandomUnit() * (0.08f + b.BoundingRadius * 0.12f);
+                jitter.Y = MathF.Abs(jitter.Y);
+                _particles.Add(new Particle
+                {
+                    Pos = b.Position + jitter,
+                    Vel = new Vector3(
+                        ((float)_rng.NextDouble() - 0.5f) * 0.35f,
+                        1.0f + (float)_rng.NextDouble() * 1.4f,
+                        ((float)_rng.NextDouble() - 0.5f) * 0.35f),
+                    Color = new Vector3(1.0f, 0.35f + (float)_rng.NextDouble() * 0.35f, 0.05f),
+                    Life = 0.28f + (float)_rng.NextDouble() * 0.22f,
+                    MaxLife = 0.50f,
+                    Size = 0.08f + (float)_rng.NextDouble() * 0.05f,
+                    Gravity = false,
+                });
+            }
         }
     }
 

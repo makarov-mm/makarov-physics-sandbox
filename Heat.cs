@@ -30,8 +30,8 @@ internal sealed class HeatSystem
     private const float CoolRate = 1.4f;        // 1/seconds, exponential drift back to ambient
     private const float SpreadRadius = 1.7f;    // how far a flame reaches to heat neighbours
     private const float SpreadPower = 900f;     // °C/second delivered at point-blank, linear falloff
-    private const float BaseFuel = 6.0f;        // seconds of burn for a fully flammable body
-    private const float FireDamagePerSecond = 16f; // hp/s to a burning ragdoll bone
+    private const float BaseFuel = 8.5f;        // seconds of burn for a fully flammable body
+    private const float FireDamagePerSecond = 42f; // hp/s to a burning ragdoll bone
     private const float DensityFireproof = 2.0f;   // bodies denser than this barely burn (metal/stone)
 
     // bodyFuel: remaining burn time. Absent => never ignited (or already cooled to ambient).
@@ -43,6 +43,13 @@ internal sealed class HeatSystem
     private static float EffectiveFlammability(RigidBody b)
     {
         if (b.Flammability <= 0f) return 0f;
+
+        // Ragdoll bones are intentionally dense for stable rigid-body motion. Do not use
+        // that physics density to make them almost fireproof; otherwise the ignite tool
+        // flashes for less than a second and never does meaningful damage.
+        if (b.Tag is RagdollBone)
+            return Math.Clamp(b.Flammability, 0f, 1.5f);
+
         float densityGate = b.Density >= DensityFireproof ? 0.12f : 1f;
         return b.Flammability * densityGate;
     }
@@ -55,7 +62,8 @@ internal sealed class HeatSystem
         if (flam <= 0.02f) { b.Temperature = MathF.Max(b.Temperature, IgnitionPoint * 0.8f); return false; }
         b.Burning = true;
         b.Temperature = BurnTemperature;
-        _fuel[b] = BaseFuel * flam;
+        _fuel[b] = BaseFuel * Math.Clamp(flam, 0.35f, 1.35f);
+        if (b.Tag is RagdollBone bone) bone.Burning = true;
         b.Wake();
         return true;
     }
@@ -88,9 +96,12 @@ internal sealed class HeatSystem
                 _fuel[b] = fuel;
                 b.Wake();
 
-                // fire damages a burning ragdoll bone (sever-capable: fire can kill)
+                // fire damages a burning ragdoll bone (sever-capable: fire can kill).
                 if (b.Tag is RagdollBone bone && !bone.Severed)
+                {
+                    bone.Burning = true;
                     ragdolls.DamageBone(bone, FireDamagePerSecond * dt, world);
+                }
 
                 // radiate to nearby flammable bodies
                 foreach (var other in world.Bodies)
@@ -122,6 +133,7 @@ internal sealed class HeatSystem
     private void BurnOut(RigidBody b)
     {
         b.Burning = false;
+        if (b.Tag is RagdollBone bone) bone.Burning = false;
         b.Flammability = 0f;          // charred: won't reignite
         b.Temperature = 220f;         // stays warm a moment, then cools via the normal path
         _fuel.Remove(b);
