@@ -4,6 +4,10 @@ using System.Runtime.InteropServices;
 
 namespace MakarovPhysicsSandbox;
 
+internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
+
+internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller }
+
 /// <summary>
 /// A WinForms control that owns an OpenGL context on its OWN window handle and runs the
 /// whole physics sandbox inside it. The form just hosts this panel, wires its toolbar and
@@ -29,6 +33,30 @@ internal sealed class GlPanel : Control
 
     /// <summary>Raised about twice a second with a status line for the StatusStrip.</summary>
     public event Action<string>? StatusUpdated;
+    public event Action? StateChanged;
+    public event Action? HelpRequested;
+
+    public bool IsPaused => _paused;
+    public bool IsSlowMo => _slowMo;
+    public bool IsZeroGravity => _zeroG;
+    public bool IsWaterOn => _waterOn;
+    public ActiveForceFieldKind ActiveForceField => _world.Fields.Count == 1
+        ? _world.Fields[0].Type switch
+        {
+            ForceField.Kind.Attract => ActiveForceFieldKind.Attractor,
+            ForceField.Kind.Repel => ActiveForceFieldKind.Repeller,
+            ForceField.Kind.Wind => ActiveForceFieldKind.Wind,
+            _ => ActiveForceFieldKind.None,
+        }
+        : ActiveForceFieldKind.None;
+
+    public PendingSceneActionKind PendingSceneAction => _pendingSceneAction;
+    public ActiveForceFieldKind PendingForceField => _pendingSceneAction switch
+    {
+        PendingSceneActionKind.Attractor => ActiveForceFieldKind.Attractor,
+        PendingSceneActionKind.Repeller => ActiveForceFieldKind.Repeller,
+        _ => ActiveForceFieldKind.None,
+    };
 
     private IntPtr _hwnd, _hdc, _hglrc;
     private int _width = 1, _height = 1;
@@ -60,6 +88,8 @@ internal sealed class GlPanel : Control
     private bool _slowMo;
     private bool _zeroG;
     private bool _stepOnce;
+    private PendingSceneActionKind _pendingSceneAction;
+    private int _pendingSpawnKind;
     private Vector3 _aimPoint;
     private bool _aimValid;
     private int _lastSpawnKind = 2;
@@ -146,21 +176,25 @@ internal sealed class GlPanel : Control
     }
 
     // ================= public actions (toolbar / menu) =================
-    public void Spawn(int kind) { if (_initialized) { SpawnBody(kind); Focus(); } }
-    public void SpawnPins()     { if (_initialized) { SpawnBowlingPins(); Focus(); } }
-    public void SpawnChain()    { if (_initialized) { DropChain(); Focus(); } }
-    public void Shoot()         { if (_initialized) { ShootBall(); Focus(); } }
-    public void Detonate()      { if (_initialized) { Explode(); Focus(); } }
-    public void Attractor()     { if (_initialized) { AddField(ForceField.Kind.Attract); Focus(); } }
-    public void Repeller()      { if (_initialized) { AddField(ForceField.Kind.Repel); Focus(); } }
-    public void Wind()          { if (_initialized) { AddField(ForceField.Kind.Wind); Focus(); } }
-    public void Water()         { if (_initialized) { ToggleWater(); Focus(); } }
-    public void Gravity()       { if (_initialized) { ToggleGravity(); Focus(); } }
-    public void Clear()         { if (_initialized) { ClearDynamic(); Focus(); } }
-    public void Reset()         { if (_initialized) { ResetScene(); Focus(); } }
-    public void TogglePause()   { _paused = !_paused; Focus(); }
-    public void ToggleSlowMo()  { _slowMo = !_slowMo; Focus(); }
-    public void StepOnce()      { _stepOnce = true; Focus(); }
+    // Toolbar/menu actions that need a position in the scene are armed first.
+    // The actual placement happens on the next left click inside the GL panel.
+    // Keyboard shortcuts still execute immediately at the current aim point, because
+    // pressing a key does not force the cursor to leave the scene.
+    public void Spawn(int kind) { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SpawnBody, kind); Focus(); } }
+    public void SpawnPins()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.BowlingPins); Focus(); } }
+    public void SpawnChain()    { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Chain); Focus(); } }
+    public void Shoot()         { if (_initialized) { CancelPendingSceneAction(); ShootBall(); Focus(); } }
+    public void Detonate()      { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Explosion); Focus(); } }
+    public void Attractor()     { if (_initialized) { ToggleOrArmField(ForceField.Kind.Attract, PendingSceneActionKind.Attractor); Focus(); } }
+    public void Repeller()      { if (_initialized) { ToggleOrArmField(ForceField.Kind.Repel, PendingSceneActionKind.Repeller); Focus(); } }
+    public void Wind()          { if (_initialized) { CancelPendingSceneAction(); AddField(ForceField.Kind.Wind); Focus(); } }
+    public void Water()         { if (_initialized) { CancelPendingSceneAction(); ToggleWater(); Focus(); } }
+    public void Gravity()       { if (_initialized) { CancelPendingSceneAction(); ToggleGravity(); Focus(); } }
+    public void Clear()         { if (_initialized) { CancelPendingSceneAction(); ClearDynamic(); Focus(); } }
+    public void Reset()         { if (_initialized) { CancelPendingSceneAction(); ResetScene(); NotifyStateChanged(); Focus(); } }
+    public void TogglePause()   { _paused = !_paused; NotifyStateChanged(); Focus(); }
+    public void ToggleSlowMo()  { _slowMo = !_slowMo; NotifyStateChanged(); Focus(); }
+    public void StepOnce()      { _stepOnce = true; NotifyStateChanged(); Focus(); }
 
     // ================= per-frame update (driven by the form's idle loop) =================
     public void RenderFrame()
@@ -192,10 +226,11 @@ internal sealed class GlPanel : Control
         _fpsTimer += dt;
         if (_fpsTimer >= 0.5)
         {
-            string flags = (_paused ? " [пауза]" : "") + (_slowMo ? " [замедление]" : "")
-                         + (_zeroG ? " [0g]" : "") + (_waterOn ? " [вода]" : "")
-                         + (_world.Fields.Count > 0 ? " [поле]" : "");
-            StatusUpdated?.Invoke($"{_frames / _fpsTimer:F0} FPS    тел: {_world.Bodies.Count}    активных: {_world.AwakeCount}{flags}");
+            string flags = (_paused ? " [paused]" : "") + (_slowMo ? " [slow motion]" : "")
+                         + (_zeroG ? " [0g]" : "") + (_waterOn ? " [water]" : "")
+                         + (_world.Fields.Count > 0 ? " [field]" : "")
+                         + (_pendingSceneAction != PendingSceneActionKind.None ? $" [click scene: {PendingSceneActionLabel()}]" : "");
+            StatusUpdated?.Invoke($"{_frames / _fpsTimer:F0} FPS    bodies: {_world.Bodies.Count}    active: {_world.AwakeCount}{flags}");
             _frames = 0;
             _fpsTimer = 0;
         }
@@ -325,7 +360,17 @@ internal sealed class GlPanel : Control
         Focus(); // so the panel starts receiving key presses
         _lastMouseX = e.X;
         _lastMouseY = e.Y;
-        if (e.Button == MouseButtons.Left) TryGrab(e.X, e.Y);
+        if (e.Button == MouseButtons.Left)
+        {
+            if (_pendingSceneAction != PendingSceneActionKind.None)
+            {
+                UpdateAim();
+                if (!ExecutePendingSceneAction())
+                    StatusUpdated?.Invoke($"Click a valid point on the floor or on an object to place {PendingSceneActionLabel()}. Press Esc to cancel.");
+                return;
+            }
+            TryGrab(e.X, e.Y);
+        }
         else if (e.Button == MouseButtons.Middle) ShootBall();
         else if (e.Button == MouseButtons.Right) _rmbDown = true;
     }
@@ -366,29 +411,31 @@ internal sealed class GlPanel : Control
     {
         switch (vk)
         {
-            case 0x31: SpawnBody(1); break;              // 1 sphere
-            case 0x32: SpawnBody(2); break;              // 2 box
-            case 0x33: SpawnBody(3); break;              // 3 capsule
-            case 0x34: SpawnBody(4); break;              // 4 plank
-            case 0x35: SpawnBody(5); break;              // 5 pillar
-            case 0x36: SpawnBody(6); break;              // 6 dumbbell
-            case 0x37: SpawnBody(7); break;              // 7 hammer
-            case 0x38: SpawnBody(8); break;              // 8 table
-            case 0x39: SpawnBowlingPins(); break;        // 9 bowling pins
-            case 0x4C: DropChain(); break;               // L  chain
-            case 0x56: ToggleWater(); break;             // V  water
-            case 0x5A: AddField(ForceField.Kind.Attract); break; // Z
-            case 0x58: AddField(ForceField.Kind.Repel); break;   // X
-            case 0x55: AddField(ForceField.Kind.Wind); break;    // U
-            case 0x20: ShootBall(); break;               // Space
-            case 0x46: ShootBall(); break;               // F
-            case 0x45: Explode(); break;                 // E
-            case 0x47: ToggleGravity(); break;           // G
-            case 0x50: _paused = !_paused; break;        // P
-            case 0x54: _slowMo = !_slowMo; break;        // T
-            case 0x42: _stepOnce = true; break;          // B
-            case 0x43: ClearDynamic(); break;            // C
-            case 0x52: ResetScene(); break;              // R
+            case 0x1B: CancelPendingSceneAction(); break;  // Esc
+            case 0x31: CancelPendingSceneAction(); SpawnBody(1); break;              // 1 sphere
+            case 0x32: CancelPendingSceneAction(); SpawnBody(2); break;              // 2 box
+            case 0x33: CancelPendingSceneAction(); SpawnBody(3); break;              // 3 capsule
+            case 0x34: CancelPendingSceneAction(); SpawnBody(4); break;              // 4 plank
+            case 0x35: CancelPendingSceneAction(); SpawnBody(5); break;              // 5 pillar
+            case 0x36: CancelPendingSceneAction(); SpawnBody(6); break;              // 6 dumbbell
+            case 0x37: CancelPendingSceneAction(); SpawnBody(7); break;              // 7 hammer
+            case 0x38: CancelPendingSceneAction(); SpawnBody(8); break;              // 8 table
+            case 0x39: CancelPendingSceneAction(); SpawnBowlingPins(); break;        // 9 bowling pins
+            case 0x4C: CancelPendingSceneAction(); DropChain(); break;               // L  chain
+            case 0x56: CancelPendingSceneAction(); ToggleWater(); break;             // V  water
+            case 0x5A: CancelPendingSceneAction(); AddField(ForceField.Kind.Attract); break; // Z
+            case 0x58: CancelPendingSceneAction(); AddField(ForceField.Kind.Repel); break;   // X
+            case 0x55: CancelPendingSceneAction(); AddField(ForceField.Kind.Wind); break;    // U
+            case 0x20: CancelPendingSceneAction(); ShootBall(); break;               // Space
+            case 0x46: CancelPendingSceneAction(); ShootBall(); break;               // F
+            case 0x45: CancelPendingSceneAction(); Explode(); break;                 // E
+            case 0x47: CancelPendingSceneAction(); ToggleGravity(); break;           // G
+            case 0x50: TogglePause(); break;             // P
+            case 0x54: ToggleSlowMo(); break;            // T
+            case 0x42: StepOnce(); break;                // B
+            case 0x43: CancelPendingSceneAction(); ClearDynamic(); break;            // C
+            case 0x52: CancelPendingSceneAction(); Reset(); break;                   // R
+            case 0x48: HelpRequested?.Invoke(); break;   // H
         }
     }
 
@@ -700,7 +747,110 @@ internal sealed class GlPanel : Control
         _zeroG = !_zeroG;
         _world.Gravity = _zeroG ? Vector3.Zero : DefaultGravity;
         foreach (var b in _world.Bodies) b.Wake(); // so they react to the change
+        NotifyStateChanged();
     }
+
+    private void ArmSceneAction(PendingSceneActionKind action, int spawnKind = 0)
+    {
+        if (_pendingSceneAction == action && _pendingSpawnKind == spawnKind)
+        {
+            CancelPendingSceneAction();
+            return;
+        }
+
+        _pendingSceneAction = action;
+        _pendingSpawnKind = spawnKind;
+        StatusUpdated?.Invoke($"Click inside the scene to place {PendingSceneActionLabel()}. Press Esc to cancel.");
+        NotifyStateChanged();
+    }
+
+    private void CancelPendingSceneAction()
+    {
+        if (_pendingSceneAction == PendingSceneActionKind.None) return;
+        _pendingSceneAction = PendingSceneActionKind.None;
+        _pendingSpawnKind = 0;
+        NotifyStateChanged();
+    }
+
+    private void ToggleOrArmField(ForceField.Kind fieldKind, PendingSceneActionKind actionKind)
+    {
+        if (_pendingSceneAction == actionKind)
+        {
+            CancelPendingSceneAction();
+            return;
+        }
+
+        if (_world.Fields.Count == 1 && _world.Fields[0].Type == fieldKind)
+        {
+            _world.Fields.Clear();
+            foreach (var b in _world.Bodies) b.Wake();
+            NotifyStateChanged();
+            return;
+        }
+
+        ArmSceneAction(actionKind);
+    }
+
+    private bool ExecutePendingSceneAction()
+    {
+        if (_pendingSceneAction == PendingSceneActionKind.None) return false;
+
+        if (!_aimValid) return false;
+
+        var action = _pendingSceneAction;
+        var spawnKind = _pendingSpawnKind;
+        _pendingSceneAction = PendingSceneActionKind.None;
+        _pendingSpawnKind = 0;
+
+        switch (action)
+        {
+            case PendingSceneActionKind.SpawnBody:
+                SpawnBody(spawnKind);
+                break;
+            case PendingSceneActionKind.BowlingPins:
+                SpawnBowlingPins();
+                break;
+            case PendingSceneActionKind.Chain:
+                DropChain();
+                break;
+            case PendingSceneActionKind.Explosion:
+                Explode();
+                break;
+            case PendingSceneActionKind.Attractor:
+                AddField(ForceField.Kind.Attract);
+                break;
+            case PendingSceneActionKind.Repeller:
+                AddField(ForceField.Kind.Repel);
+                break;
+            default:
+                return false;
+        }
+
+        NotifyStateChanged();
+        return true;
+    }
+
+    private string PendingSceneActionLabel() => _pendingSceneAction switch
+    {
+        PendingSceneActionKind.SpawnBody => _pendingSpawnKind switch
+        {
+            1 => "sphere",
+            2 => "box",
+            3 => "capsule",
+            4 => "plank",
+            5 => "pillar",
+            6 => "dumbbell",
+            7 => "hammer",
+            8 => "table",
+            _ => "object",
+        },
+        PendingSceneActionKind.BowlingPins => "bowling pins",
+        PendingSceneActionKind.Chain => "chain",
+        PendingSceneActionKind.Explosion => "explosion",
+        PendingSceneActionKind.Attractor => "attractor",
+        PendingSceneActionKind.Repeller => "repeller",
+        _ => "tool",
+    };
 
     private void ClearDynamic()
     {
@@ -867,16 +1017,25 @@ internal sealed class GlPanel : Control
                 LinearDrag = 2.5f,
             });
         foreach (var b in _world.Bodies) b.Wake();
+        NotifyStateChanged();
     }
 
     private void AddField(ForceField.Kind kind)
     {
-        if (!_aimValid && kind != ForceField.Kind.Wind) return;
-        // keep it simple: one field at a time, toggle off if the same kind is re-added
+        // keep it simple: one field at a time, toggle off if the same kind is re-added.
+        // The same-kind toggle must work even when the mouse is not over a valid aim point.
         bool sameExists = _world.Fields.Count == 1 && _world.Fields[0].Type == kind;
-        _world.Fields.Clear();
-        if (sameExists) return;
+        if (sameExists)
+        {
+            _world.Fields.Clear();
+            foreach (var b in _world.Bodies) b.Wake();
+            NotifyStateChanged();
+            return;
+        }
 
+        if (!_aimValid && kind != ForceField.Kind.Wind) return;
+
+        _world.Fields.Clear();
         if (kind == ForceField.Kind.Wind)
         {
             var dir = Vector3.Normalize(new Vector3(_camTarget.X - _camPos.X, 0, _camTarget.Z - _camPos.Z));
@@ -887,6 +1046,13 @@ internal sealed class GlPanel : Control
             _world.Fields.Add(new ForceField { Type = kind, Position = _aimPoint + new Vector3(0, 1.5f, 0), Radius = 7f, Strength = 18f });
         }
         foreach (var b in _world.Bodies) b.Wake();
+        NotifyStateChanged();
+    }
+
+    private void NotifyStateChanged()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        StateChanged?.Invoke();
     }
 
     // ================= camera & picking =================

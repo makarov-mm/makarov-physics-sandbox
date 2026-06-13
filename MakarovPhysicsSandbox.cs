@@ -1,11 +1,16 @@
-using System.Diagnostics;
-
 namespace MakarovPhysicsSandbox
 {
     public partial class MakarovPhysicsSandbox : Form
     {
         private GlPanel _gl = null!;
         private ToolStripStatusLabel _status = null!;
+        private ToolStripButton? _waterButton;
+        private ToolStripButton? _gravityButton;
+        private ToolStripButton? _pauseButton;
+        private ToolStripButton? _slowMoButton;
+        private ToolStripButton? _attractorButton;
+        private ToolStripButton? _repellerButton;
+        private ToolStripButton? _windButton;
 
         public MakarovPhysicsSandbox()
         {
@@ -21,12 +26,18 @@ namespace MakarovPhysicsSandbox
         {
             _gl = new GlPanel { Dock = DockStyle.Fill };
             _gl.StatusUpdated += OnStatus;
+            _gl.StateChanged += UpdateToolbarState;
+            _gl.HelpRequested += ShowHelp;
 
             var menu = BuildMenu();
             var tools = BuildToolbar();
 
             var statusStrip = new StatusStrip();
-            _status = new ToolStripStatusLabel("готово") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
+            _status = new ToolStripStatusLabel("Ready — keys: 1–9/L objects | Space/F shoot | E explosion | G gravity | P pause | R reset | H help; toolbar placement tools: click icon, then click scene")
+            {
+                Spring = true,
+                TextAlign = ContentAlignment.MiddleLeft,
+            };
             statusStrip.Items.Add(_status);
 
             // Add the fill control first, then the docked bars; WinForms resolves docking
@@ -39,6 +50,7 @@ namespace MakarovPhysicsSandbox
             MainMenuStrip = menu;
 
             Shown += (_, _) => _gl.Focus();
+            UpdateToolbarState();
         }
 
         private void OnStatus(string text)
@@ -55,104 +67,178 @@ namespace MakarovPhysicsSandbox
                 GripStyle = ToolStripGripStyle.Hidden,
             };
 
-            // object -> icon file -> action; icons live in the icons\ folder next to the exe
-            (string label, string icon, Action act)[] items =
+            AddToolbarButton(ts, "Sphere",       "sphere.png",   "1",        () => _gl.Spawn(1), placeOnScene: true);
+            AddToolbarButton(ts, "Box",          "box.png",      "2",        () => _gl.Spawn(2), placeOnScene: true);
+            AddToolbarButton(ts, "Capsule",      "capsule.png",  "3",        () => _gl.Spawn(3), placeOnScene: true);
+            AddToolbarButton(ts, "Plank",        "plank.png",    "4",        () => _gl.Spawn(4), placeOnScene: true);
+            AddToolbarButton(ts, "Pillar",       "pillar.png",   "5",        () => _gl.Spawn(5), placeOnScene: true);
+            AddToolbarButton(ts, "Dumbbell",     "dumbbell.png", "6",        () => _gl.Spawn(6), placeOnScene: true);
+            AddToolbarButton(ts, "Hammer",       "hammer.png",   "7",        () => _gl.Spawn(7), placeOnScene: true);
+            AddToolbarButton(ts, "Table",        "table.png",    "8",        () => _gl.Spawn(8), placeOnScene: true);
+            AddToolbarButton(ts, "Bowling pins", "pins.png",     "9",        () => _gl.SpawnPins(), placeOnScene: true);
+            AddToolbarButton(ts, "Chain",        "chain.png",    "L",        () => _gl.SpawnChain(), placeOnScene: true);
+
+            ts.Items.Add(new ToolStripSeparator());
+
+            AddToolbarButton(ts, "Shoot ball",   "shoot.png",     "Space / F", () => _gl.Shoot());
+            AddToolbarButton(ts, "Explosion",    "explosion.png", "E",         () => _gl.Detonate(), placeOnScene: true);
+            _waterButton = AddToolbarButton(ts, "Water",          "water.png",     "V", () => _gl.Water(), checkable: true);
+            _attractorButton = AddToolbarButton(ts, "Attractor",  "attractor.png", "Z", () => _gl.Attractor(), checkable: true, placeOnScene: true);
+            _repellerButton = AddToolbarButton(ts, "Repeller",    "repeller.png",  "X", () => _gl.Repeller(), checkable: true, placeOnScene: true);
+            _windButton = AddToolbarButton(ts, "Wind",            "wind.png",      "U", () => _gl.Wind(), checkable: true);
+            _gravityButton = AddToolbarButton(ts, "Gravity on/off", "gravity.png", "G", () => _gl.Gravity(), checkable: true);
+
+            ts.Items.Add(new ToolStripSeparator());
+
+            _pauseButton = AddToolbarButton(ts, "Pause", "pause.png", "P", () => _gl.TogglePause(), checkable: true);
+            _slowMoButton = AddToolbarButton(ts, "Slow motion", "slowmo.png", "T", () => _gl.ToggleSlowMo(), checkable: true);
+            AddToolbarButton(ts, "Single step", "step.png", "B", () => _gl.StepOnce());
+            AddToolbarButton(ts, "Clear dynamic objects", "clear.png", "C", () => _gl.Clear());
+            AddToolbarButton(ts, "Reset scene", "reset.png", "R", () => _gl.Reset());
+            AddToolbarButton(ts, "Keyboard help", "help.png", "H", ShowHelp);
+
+            ts.Items.Add(new ToolStripSeparator());
+            ts.Items.Add(new ToolStripLabel("Keys: 1–9/L objects · Space/F shoot · E explosion · G gravity · Esc cancel placement · H help")
             {
-                ("Шар",     "sphere.png",   () => _gl.Spawn(1)),
-                ("Куб",     "box.png",      () => _gl.Spawn(2)),
-                ("Капсула", "capsule.png",  () => _gl.Spawn(3)),
-                ("Доска",   "plank.png",    () => _gl.Spawn(4)),
-                ("Колонна", "pillar.png",   () => _gl.Spawn(5)),
-                ("Гантель", "dumbbell.png", () => _gl.Spawn(6)),
-                ("Молоток", "hammer.png",   () => _gl.Spawn(7)),
-                ("Стол",    "table.png",    () => _gl.Spawn(8)),
-                ("Кегли",   "pins.png",     () => _gl.SpawnPins()),
-                ("Цепь",    "chain.png",    () => _gl.SpawnChain()),
+                Margin = new Padding(8, 1, 0, 2),
+            });
+
+            return ts;
+        }
+
+        private ToolStripButton AddToolbarButton(ToolStrip ts, string label, string icon, string shortcut, Action act, bool checkable = false, bool placeOnScene = false)
+        {
+            var b = new ToolStripButton(label)
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Image,
+                ToolTipText = placeOnScene
+                    ? $"{label} ({shortcut}) — click this button, then click inside the scene to place. Esc cancels."
+                    : $"{label} ({shortcut})",
+                AutoSize = false,
+                Size = new Size(44, 44),
+                CheckOnClick = false,
             };
 
-            string dir = Path.Combine(AppContext.BaseDirectory, "icons");
-            foreach (var (label, icon, act) in items)
+            try
             {
-                var b = new ToolStripButton(label)
+                string path = Path.Combine(AppContext.BaseDirectory, "icons", icon);
+                if (File.Exists(path))
                 {
-                    DisplayStyle = ToolStripItemDisplayStyle.Image,
-                    ToolTipText = label,
-                    AutoSize = false,
-                    Size = new Size(44, 44),
-                };
-                try
-                {
-                    string path = Path.Combine(dir, icon);
-                    if (File.Exists(path)) b.Image = Image.FromFile(path);
-                    else b.DisplayStyle = ToolStripItemDisplayStyle.Text; // fall back to a text button
+                    using var img = Image.FromFile(path);
+                    b.Image = new Bitmap(img);
                 }
-                catch { b.DisplayStyle = ToolStripItemDisplayStyle.Text; }
-
-                b.Click += (_, _) => act();
-                ts.Items.Add(b);
+                else
+                {
+                    b.DisplayStyle = ToolStripItemDisplayStyle.Text;
+                    b.Text = shortcut;
+                }
             }
-            return ts;
+            catch
+            {
+                b.DisplayStyle = ToolStripItemDisplayStyle.Text;
+                b.Text = shortcut;
+            }
+
+            b.Click += (_, _) =>
+            {
+                act();
+                UpdateToolbarState();
+            };
+
+            if (checkable) b.CheckOnClick = false;
+            ts.Items.Add(b);
+            return b;
         }
 
         private MenuStrip BuildMenu()
         {
             var menu = new MenuStrip();
 
-            var file = new ToolStripMenuItem("Файл");
-            file.DropDownItems.Add(new ToolStripMenuItem("Выход", null, (_, _) => Close()));
+            var file = new ToolStripMenuItem("File");
+            file.DropDownItems.Add(new ToolStripMenuItem("Exit", null, (_, _) => Close()));
 
-            var actions = new ToolStripMenuItem("Действия");
-            AddItem(actions, "Выстрел шаром", "СКМ / Space / F", () => _gl.Shoot());
-            AddItem(actions, "Взрыв",          "E", () => _gl.Detonate());
-            AddItem(actions, "Вода",           "V", () => _gl.Water());
-            AddItem(actions, "Аттрактор",      "Z", () => _gl.Attractor());
-            AddItem(actions, "Репеллер",       "X", () => _gl.Repeller());
-            AddItem(actions, "Ветер",          "U", () => _gl.Wind());
-            AddItem(actions, "Невесомость",    "G", () => _gl.Gravity());
+            var actions = new ToolStripMenuItem("Actions");
+            AddItem(actions, "Shoot ball",      "Middle mouse / Space / F", () => _gl.Shoot());
+            AddItem(actions, "Explosion",       "E", () => _gl.Detonate());
+            AddItem(actions, "Water",           "V", () => _gl.Water());
+            AddItem(actions, "Attractor",       "Z", () => _gl.Attractor());
+            AddItem(actions, "Repeller",        "X", () => _gl.Repeller());
+            AddItem(actions, "Wind",            "U", () => _gl.Wind());
+            AddItem(actions, "Gravity on/off",  "G", () => _gl.Gravity());
 
-            var time = new ToolStripMenuItem("Время");
-            AddItem(time, "Пауза",        "P", () => _gl.TogglePause());
-            AddItem(time, "Замедление",   "T", () => _gl.ToggleSlowMo());
-            AddItem(time, "Один шаг",     "B", () => _gl.StepOnce());
+            var simulation = new ToolStripMenuItem("Simulation");
+            AddItem(simulation, "Pause",        "P", () => _gl.TogglePause());
+            AddItem(simulation, "Slow motion",  "T", () => _gl.ToggleSlowMo());
+            AddItem(simulation, "Single step",  "B", () => _gl.StepOnce());
 
-            var scene = new ToolStripMenuItem("Сцена");
-            AddItem(scene, "Очистить",    "C", () => _gl.Clear());
-            AddItem(scene, "Сбросить",    "R", () => _gl.Reset());
+            var scene = new ToolStripMenuItem("Scene");
+            AddItem(scene, "Clear dynamic objects", "C", () => _gl.Clear());
+            AddItem(scene, "Reset scene",           "R", () => _gl.Reset());
 
-            var help = new ToolStripMenuItem("Справка");
-            help.DropDownItems.Add(new ToolStripMenuItem("Управление", null, (_, _) => ShowHelp()));
+            var help = new ToolStripMenuItem("Help");
+            help.DropDownItems.Add(new ToolStripMenuItem("Keyboard controls", null, (_, _) => ShowHelp())
+            {
+                ShortcutKeyDisplayString = "H",
+            });
 
-            menu.Items.AddRange(new ToolStripItem[] { file, actions, time, scene, help });
+            menu.Items.AddRange(new ToolStripItem[] { file, actions, simulation, scene, help });
             return menu;
         }
 
         // Menu items show the hotkey as a hint only. The actual key handling lives in the
         // GL panel (so it works while the mouse is over the scene); wiring real ShortcutKeys
         // here too would fire the action twice.
-        private static void AddItem(ToolStripMenuItem parent, string text, string hotkeyHint, Action act)
+        private void AddItem(ToolStripMenuItem parent, string text, string hotkeyHint, Action act)
         {
-            parent.DropDownItems.Add(new ToolStripMenuItem(text, null, (_, _) => act())
+            parent.DropDownItems.Add(new ToolStripMenuItem(text, null, (_, _) =>
+            {
+                act();
+                UpdateToolbarState();
+            })
             {
                 ShortcutKeyDisplayString = hotkeyHint,
             });
         }
 
+        private void UpdateToolbarState()
+        {
+            if (_gl == null) return;
+
+            if (_waterButton != null) _waterButton.Checked = _gl.IsWaterOn;
+            if (_gravityButton != null)
+            {
+                _gravityButton.Checked = _gl.IsZeroGravity;
+                _gravityButton.ToolTipText = _gl.IsZeroGravity ? "Gravity is off (G)" : "Gravity is on (G)";
+            }
+            if (_pauseButton != null) _pauseButton.Checked = _gl.IsPaused;
+            if (_slowMoButton != null) _slowMoButton.Checked = _gl.IsSlowMo;
+
+            var field = _gl.ActiveForceField;
+            var pendingField = _gl.PendingForceField;
+            if (_attractorButton != null) _attractorButton.Checked = field == ActiveForceFieldKind.Attractor || pendingField == ActiveForceFieldKind.Attractor;
+            if (_repellerButton != null) _repellerButton.Checked = field == ActiveForceFieldKind.Repeller || pendingField == ActiveForceFieldKind.Repeller;
+            if (_windButton != null) _windButton.Checked = field == ActiveForceFieldKind.Wind;
+        }
+
         private void ShowHelp()
         {
             MessageBox.Show(this,
-                "Мышь:\n" +
-                "  ЛКМ — схватить и тащить объект\n" +
-                "  ПКМ + движение — вращать камеру\n" +
-                "  Колесо — приблизить / отдалить\n" +
-                "  СКМ — выстрелить шаром\n\n" +
-                "Клавиши:\n" +
-                "  1–8 — объекты, 9 — кегли, L — цепь\n" +
-                "  Space/F — выстрел, E — взрыв\n" +
-                "  Z/X/U — аттрактор/репеллер/ветер, V — вода, G — невесомость\n" +
-                "  P — пауза, T — замедление, B — шаг\n" +
-                "  C — очистить, R — сбросить\n\n" +
-                "Объекты появляются там, куда наведён прицел (янтарный маркер).",
-                "Управление", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "Mouse:\n" +
+                "  Left mouse — grab and drag an object\n" +
+                "  Right mouse + move — rotate the camera\n" +
+                "  Mouse wheel — zoom in / out\n" +
+                "  Middle mouse — shoot a ball\n\n" +
+                "Toolbar / menu:\n" +
+                "  Object, explosion, attractor and repeller buttons arm a placement tool.\n" +
+                "  Then left-click inside the scene to place it. Esc cancels placement.\n\n" +
+                "Keyboard:\n" +
+                "  1–8 — objects, 9 — bowling pins, L — chain\n" +
+                "  Space/F — shoot, E — explosion\n" +
+                "  Z/X/U — attractor / repeller / wind, V — water, G — gravity on/off\n" +
+                "  P — pause, T — slow motion, B — single physics step\n" +
+                "  C — clear dynamic objects, R — reset scene, H — this help, Esc — cancel placement\n\n" +
+                "Keyboard actions use the current aim point under the cursor marker.",
+                "Keyboard controls", MessageBoxButtons.OK, MessageBoxIcon.Information);
             _gl.Focus();
         }
 
