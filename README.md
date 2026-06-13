@@ -1,41 +1,33 @@
 # Makarov Physics Sandbox
 
-A small WinForms/OpenGL physics sandbox written in C# without third-party physics or rendering libraries.
+A WinForms + OpenGL physics sandbox in pure C#.
 
-## Controls
+Current feature set includes:
 
-Mouse:
+- English menu/toolbar UI.
+- Visual toolbar tools and keyboard shortcuts.
+- Scene placement tools with preview for attractor, repeller, wind and explosion.
+- Wavy water surface with buoyancy.
+- Force-field VFX for attractor, repeller and wind.
+- Object connection, disconnection and spring links.
+- Save/load scene support via `.mpscene` JSON files.
+- Object selection and property editing.
+- Material presets: Wood, Metal, Rubber, Glass, Stone, Foam, Ice and Plastic.
+- Scene presets.
+- Challenges/goals.
+- Breakable objects.
+- Basic sound and particle feedback.
+- Trigger plates / sensors.
+- Editor tool modes and a simple object gizmo.
 
-- Left mouse: grab and drag an object.
-- Right mouse + move: rotate the camera.
-- Mouse wheel: zoom in/out.
-- Middle mouse: shoot a ball.
+Material presets are not hard engine types yet. They are convenient UI presets that apply density, friction, bounciness, color and breakability to the selected object. Scenes still save the resulting physical values, so older files remain compatible.
 
-Toolbar / menu:
+Polish pass:
 
-- Object buttons, bowling pins, chain, explosion, attractor and repeller are placement tools.
-- Click the toolbar/menu item first, then click inside the scene to place the object/effect/field.
-- Press `Esc` to cancel a pending placement.
-- Gravity, water, wind, pause, slow motion, step, clear and reset act immediately.
-
-Keyboard:
-
-- `1`-`8`: spawn objects.
-- `9`: bowling pins.
-- `L`: chain.
-- `Space` or `F`: shoot a ball.
-- `E`: explosion.
-- `Z`: attractor.
-- `X`: repeller.
-- `U`: wind.
-- `V`: water.
-- `G`: gravity on/off.
-- `P`: pause.
-- `T`: slow motion.
-- `B`: single physics step.
-- `C`: clear dynamic objects.
-- `R`: reset scene.
-- `H`: keyboard help.
-- `Esc`: cancel pending toolbar/menu placement.
-
-Keyboard actions use the current aim point under the cursor marker. Toolbar/menu placement tools no longer use the cursor position while it is over the toolbar; they wait for the next scene click.
+- Darker application chrome for menus, toolbar, status bar and property panels.
+- Application title, maximized startup window and minimum usable window size.
+- F4 toggles the right property panel.
+- F11 toggles fullscreen mode.
+- Ctrl+S and Ctrl+O are handled globally for save/load.
+- Ctrl+D duplicates the selected object.
+- Help text and status text were shortened and cleaned up for the current editor workflow.

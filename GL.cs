@@ -120,6 +120,7 @@ internal static class GL
     private delegate void Uniform3fDel(int location, float x, float y, float z);
     private delegate void Uniform1iDel(int location, int v);
     private delegate void Uniform1fDel(int location, float v);
+    private delegate void Uniform4fvDel(int location, int count, float[] value);
     private delegate void GenVertexArraysDel(int n, uint[] arrays);
     private delegate void BindVertexArrayDel(uint array);
     private delegate void GenBuffersDel(int n, uint[] buffers);
@@ -151,6 +152,7 @@ internal static class GL
     private static Uniform3fDel _uniform3f = null!;
     private static Uniform1iDel _uniform1i = null!;
     private static Uniform1fDel _uniform1f = null!;
+    private static Uniform4fvDel _uniform4fv = null!;
     private static GenVertexArraysDel _genVertexArrays = null!;
     private static BindVertexArrayDel _bindVertexArray = null!;
     private static GenBuffersDel _genBuffers = null!;
@@ -191,6 +193,7 @@ internal static class GL
         _uniform3f = Load<Uniform3fDel>("glUniform3f");
         _uniform1i = Load<Uniform1iDel>("glUniform1i");
         _uniform1f = Load<Uniform1fDel>("glUniform1f");
+        _uniform4fv = Load<Uniform4fvDel>("glUniform4fv");
         _genVertexArrays = Load<GenVertexArraysDel>("glGenVertexArrays");
         _bindVertexArray = Load<BindVertexArrayDel>("glBindVertexArray");
         _genBuffers = Load<GenBuffersDel>("glGenBuffers");
@@ -258,6 +261,8 @@ internal static class GL
     public static void Uniform3(int location, float x, float y, float z) => _uniform3f(location, x, y, z);
     public static void Uniform1(int location, int v) => _uniform1i(location, v);
     public static void Uniform1(int location, float v) => _uniform1f(location, v);
+    /// <summary>Uploads `count` vec4s from a flat float array (x,y,z,w per element).</summary>
+    public static void Uniform4(int location, int count, float[] values) => _uniform4fv(location, count, values);
 
     public static uint GenVertexArray() { var a = new uint[1]; _genVertexArrays(1, a); return a[0]; }
     public static void BindVertexArray(uint vao) => _bindVertexArray(vao);

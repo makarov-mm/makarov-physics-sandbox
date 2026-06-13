@@ -1,12 +1,99 @@
 using System.Diagnostics;
+using System.Media;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace MakarovPhysicsSandbox;
 
 internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
 
-internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller }
+internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect }
+
+
+internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller }
+
+internal enum EditorToolMode { Select, Move, Rotate, Scale }
+
+internal sealed class SelectedTriggerSnapshot
+{
+    public string Name { get; init; } = "Trigger";
+    public Vector3 Position { get; init; }
+    public Vector3 HalfExtents { get; init; }
+    public TriggerActionKind Action { get; init; }
+    public bool OneShot { get; init; }
+    public bool Enabled { get; init; }
+    public float Radius { get; init; }
+    public float Strength { get; init; }
+    public float CooldownSeconds { get; init; }
+    public Vector3 TargetPosition { get; init; }
+}
+
+internal sealed class SelectedTriggerProperties
+{
+    public string Name { get; init; } = "Trigger";
+    public Vector3 Position { get; init; }
+    public Vector3 HalfExtents { get; init; }
+    public TriggerActionKind Action { get; init; }
+    public bool OneShot { get; init; }
+    public bool Enabled { get; init; }
+    public float Radius { get; init; }
+    public float Strength { get; init; }
+    public float CooldownSeconds { get; init; }
+    public Vector3 TargetPosition { get; init; }
+}
+
+internal sealed class SceneTrigger
+{
+    public string Name = "Trigger";
+    public Vector3 Position;
+    public Vector3 HalfExtents = new(0.9f, 0.08f, 0.9f);
+    public TriggerActionKind Action = TriggerActionKind.Explosion;
+    public bool OneShot;
+    public bool Enabled = true;
+    public bool WasPressed;
+    public float Cooldown;
+    public float CooldownSeconds = 1.0f;
+    public float Pulse;
+    public float Radius = 5.0f;
+    public float Strength = 10.0f;
+    public Vector3 TargetOffset;
+
+    public Vector3 TargetPosition
+    {
+        get => Position + TargetOffset;
+        set => TargetOffset = value - Position;
+    }
+}
+
+internal sealed class SelectedBodySnapshot
+{
+    public bool IsStatic { get; init; }
+    public int ChildCount { get; init; }
+    public float Mass { get; init; }
+    public float Density { get; init; }
+    public float Friction { get; init; }
+    public float Restitution { get; init; }
+    public Vector3 Position { get; init; }
+    public Vector3 Velocity { get; init; }
+    public Vector3 Color { get; init; }
+    public bool Breakable { get; init; }
+    public float BreakThreshold { get; init; }
+}
+
+internal sealed class SelectedBodyProperties
+{
+    public bool IsStatic { get; init; }
+    public float Density { get; init; }
+    public float Friction { get; init; }
+    public float Restitution { get; init; }
+    public Vector3 Position { get; init; }
+    public Vector3 Velocity { get; init; }
+    public Vector3 Color { get; init; }
+    public bool Breakable { get; init; }
+    public float BreakThreshold { get; init; }
+}
 
 /// <summary>
 /// A WinForms control that owns an OpenGL context on its OWN window handle and runs the
@@ -15,7 +102,7 @@ internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Expl
 /// no separate Win32 window and no blocking message pump anymore - that was the bug in the
 /// first integration (the engine's old Run() opened a second window and froze the form).
 /// </summary>
-internal sealed class GlPanel : Control
+internal sealed partial class GlPanel : Control
 {
     // ---- WGL extension delegates (resolved through a throwaway context) ----
     private delegate bool WglChoosePixelFormatARBDel(
@@ -35,11 +122,15 @@ internal sealed class GlPanel : Control
     public event Action<string>? StatusUpdated;
     public event Action? StateChanged;
     public event Action? HelpRequested;
+    public event Action<SelectedBodySnapshot?>? SelectionChanged;
+    public event Action<SelectedTriggerSnapshot?>? TriggerSelectionChanged;
 
     public bool IsPaused => _paused;
     public bool IsSlowMo => _slowMo;
     public bool IsZeroGravity => _zeroG;
     public bool IsWaterOn => _waterOn;
+    public bool IsSoundOn => _soundEnabled;
+    public EditorToolMode ActiveEditorTool => _editorTool;
     public ActiveForceFieldKind ActiveForceField => _world.Fields.Count == 1
         ? _world.Fields[0].Type switch
         {
@@ -55,6 +146,7 @@ internal sealed class GlPanel : Control
     {
         PendingSceneActionKind.Attractor => ActiveForceFieldKind.Attractor,
         PendingSceneActionKind.Repeller => ActiveForceFieldKind.Repeller,
+        PendingSceneActionKind.Wind => ActiveForceFieldKind.Wind,
         _ => ActiveForceFieldKind.None,
     };
 
@@ -64,12 +156,13 @@ internal sealed class GlPanel : Control
 
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
-    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _planeMesh = null!;
+    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _planeMesh = null!, _waterMesh = null!;
     private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete;
     private uint _shadowFbo, _shadowTex;
     private const int ShadowSize = 2048;
 
-    private int _uModel, _uView, _uProj, _uLightVP, _uColor, _uLightDir, _uCamPos, _uShadowMap, _uAlbedo, _uUvScale, _uAlpha, _uEmissive;
+    private int _uModel, _uView, _uProj, _uLightVP, _uColor, _uLightDir, _uCamPos, _uShadowMap, _uAlbedo, _uUvScale, _uAlpha, _uEmissive, _uTime, _uWaterWaveAmp, _uRippleCount, _uRipples;
+    private readonly float[] _rippleBuffer = new float[WaterVolume.MaxRipples * 4];
     private int _dModel, _dLightVP;
 
     // ---- camera (orbit) ----
@@ -90,6 +183,17 @@ internal sealed class GlPanel : Control
     private bool _stepOnce;
     private PendingSceneActionKind _pendingSceneAction;
     private int _pendingSpawnKind;
+    private RigidBody? _jointFirstBody;
+    private Vector3 _jointFirstLocal;
+    private Vector3 _jointFirstWorld;
+    private RigidBody? _selectedBody;
+    private SceneTrigger? _selectedTrigger;
+    private EditorToolMode _editorTool = EditorToolMode.Select;
+    private bool _toolDragging;
+    private int _toolDragStartX, _toolDragStartY;
+    private Vector3 _toolStartPos;
+    private Quaternion _toolStartRot;
+    private float _toolLastScaleFactor = 1f;
     private Vector3 _aimPoint;
     private bool _aimValid;
     private int _lastSpawnKind = 2;
@@ -106,7 +210,35 @@ internal sealed class GlPanel : Control
     private readonly List<Particle> _particles = new(512);
     private const int MaxParticles = 600;
 
+    // ---- lightweight feedback sounds / water-entry tracking ----
+    private bool _soundEnabled = false;
+    private double _nextImpactSound, _nextSplashSound, _nextExplosionSound;
+    private readonly Dictionary<RigidBody, bool> _waterTouchState = new();
+
+    // ---- interactive triggers / pressure plates ----
+    private readonly List<SceneTrigger> _triggers = new();
+
     private bool _waterOn;
+
+    // ---- challenge mode ----
+    private ChallengeKind _challengeKind = ChallengeKind.None;
+    private string _challengeTitle = "";
+    private string _challengeGoal = "";
+    private string _challengeMessage = "";
+    private float _challengeTimer;
+    private bool _challengeSuccess;
+    private bool _challengeFailed;
+    private Vector3 _challengeTarget;
+    private float _challengeTargetRadius;
+    private int _challengeStartCount;
+    private int _challengeScore;
+    private readonly List<RigidBody> _challengeBodies = [];
+
+    // ---- campaign (levels + stars + progress) ----
+    private CampaignProgress _campaign = new();
+    private int _levelIndex = -1;          // -1 = not in campaign (free challenge / sandbox)
+    private int _shotsThisLevel;
+    public event Action<int>? LevelCompleted; // fired with the level index when it is beaten
 
     // ---- physics ----
     private readonly PhysicsWorld _world = new();
@@ -145,6 +277,7 @@ internal sealed class GlPanel : Control
         GL.LoadFunctions();
         InitGraphics();
         ResetScene();
+        _campaign = CampaignProgress.Load();
         _initialized = true;
     }
 
@@ -187,14 +320,166 @@ internal sealed class GlPanel : Control
     public void Detonate()      { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Explosion); Focus(); } }
     public void Attractor()     { if (_initialized) { ToggleOrArmField(ForceField.Kind.Attract, PendingSceneActionKind.Attractor); Focus(); } }
     public void Repeller()      { if (_initialized) { ToggleOrArmField(ForceField.Kind.Repel, PendingSceneActionKind.Repeller); Focus(); } }
-    public void Wind()          { if (_initialized) { CancelPendingSceneAction(); AddField(ForceField.Kind.Wind); Focus(); } }
+    public void Wind()          { if (_initialized) { ToggleOrArmField(ForceField.Kind.Wind, PendingSceneActionKind.Wind); Focus(); } }
+    public void Connect()       { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Connect); Focus(); } }
+    public void Spring()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Spring); Focus(); } }
+    public void Disconnect()    { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Disconnect); Focus(); } }
     public void Water()         { if (_initialized) { CancelPendingSceneAction(); ToggleWater(); Focus(); } }
     public void Gravity()       { if (_initialized) { CancelPendingSceneAction(); ToggleGravity(); Focus(); } }
+    public void ToggleSound()   { _soundEnabled = !_soundEnabled; NotifyStateChanged(); Focus(); }
     public void Clear()         { if (_initialized) { CancelPendingSceneAction(); ClearDynamic(); Focus(); } }
     public void Reset()         { if (_initialized) { CancelPendingSceneAction(); ResetScene(); NotifyStateChanged(); Focus(); } }
     public void TogglePause()   { _paused = !_paused; NotifyStateChanged(); Focus(); }
     public void ToggleSlowMo()  { _slowMo = !_slowMo; NotifyStateChanged(); Focus(); }
     public void StepOnce()      { _stepOnce = true; NotifyStateChanged(); Focus(); }
+    public void LoadPreset(string presetName)
+    {
+        if (!_initialized) return;
+        CancelPendingSceneAction();
+        SelectBody(null);
+        SelectTrigger(null);
+        LoadPresetScene(presetName);
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void LoadChallenge(string challengeName)
+    {
+        if (!_initialized) return;
+        CancelPendingSceneAction();
+        SelectBody(null);
+        SelectTrigger(null);
+        _levelIndex = -1; // free challenge: not part of the campaign, no stars recorded
+        LoadChallengeScene(challengeName);
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void ApplySelectedBodyProperties(SelectedBodyProperties props)
+    {
+        if (_selectedBody == null) return;
+        var b = _selectedBody;
+        b.Position = props.Position;
+        b.Velocity = props.IsStatic ? Vector3.Zero : props.Velocity;
+        b.Color = Vector3.Clamp(props.Color, Vector3.Zero, Vector3.One);
+        b.Friction = Math.Clamp(props.Friction, 0f, 3f);
+        b.Restitution = Math.Clamp(props.Restitution, 0f, 2f);
+        b.Density = Math.Clamp(props.Density, 0.001f, 100f);
+        b.Breakable = props.Breakable;
+        b.BreakThreshold = Math.Clamp(props.BreakThreshold, 1f, 50f);
+        b.SetStatic(props.IsStatic);
+        if (!props.IsStatic) b.RecomputeMass(b.Density);
+        b.UpdateDerived();
+        b.Wake();
+        NotifySelectionChanged();
+        Focus();
+    }
+
+    public void ScaleSelectedBody(float factor)
+    {
+        if (_selectedBody == null) return;
+        _selectedBody.ScaleUniform(factor);
+        NotifySelectionChanged();
+        Focus();
+    }
+
+    public void DeleteSelectedBody()
+    {
+        if (_selectedBody == null) return;
+        var b = _selectedBody;
+        _world.Joints.RemoveAll(j => j.Involves(b));
+        _world.RemoveBody(b);
+        SelectBody(null);
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void DuplicateSelectedBody()
+    {
+        if (_selectedBody == null) return;
+        EvictIfFull();
+        var copy = _selectedBody.Clone(new Vector3(0.8f, 0.4f, 0.8f));
+        _world.Bodies.Add(copy);
+        SelectBody(copy);
+        NotifyStateChanged();
+        Focus();
+    }
+    public void ApplySelectedTriggerProperties(SelectedTriggerProperties props)
+    {
+        if (_selectedTrigger == null) return;
+        var tr = _selectedTrigger;
+        tr.Name = string.IsNullOrWhiteSpace(props.Name) ? "Trigger" : props.Name.Trim();
+        tr.Position = props.Position;
+        tr.HalfExtents = new Vector3(
+            Math.Clamp(props.HalfExtents.X, 0.15f, 8f),
+            Math.Clamp(props.HalfExtents.Y, 0.02f, 2f),
+            Math.Clamp(props.HalfExtents.Z, 0.15f, 8f));
+        tr.Action = props.Action;
+        tr.OneShot = props.OneShot;
+        tr.Enabled = props.Enabled;
+        tr.Radius = Math.Clamp(props.Radius, 0.5f, 40f);
+        tr.Strength = Math.Clamp(props.Strength, 0.1f, 80f);
+        tr.CooldownSeconds = Math.Clamp(props.CooldownSeconds, 0.05f, 20f);
+        tr.TargetPosition = props.TargetPosition;
+        tr.WasPressed = false;
+        tr.Pulse = 0.35f;
+        NotifyTriggerSelectionChanged();
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void DeleteSelectedTrigger()
+    {
+        if (_selectedTrigger == null) return;
+        _triggers.Remove(_selectedTrigger);
+        SelectTrigger(null);
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void DuplicateSelectedTrigger()
+    {
+        if (_selectedTrigger == null) return;
+        var t = _selectedTrigger;
+        var copy = new SceneTrigger
+        {
+            Name = t.Name + " copy",
+            Position = t.Position + new Vector3(1.4f, 0f, 1.4f),
+            HalfExtents = t.HalfExtents,
+            Action = t.Action,
+            OneShot = t.OneShot,
+            Enabled = t.Enabled,
+            Radius = t.Radius,
+            Strength = t.Strength,
+            CooldownSeconds = t.CooldownSeconds,
+            TargetOffset = t.TargetOffset,
+        };
+        _triggers.Add(copy);
+        SelectTrigger(copy);
+        NotifyStateChanged();
+        Focus();
+    }
+
+
+    public void SetEditorTool(EditorToolMode tool)
+    {
+        if (!_initialized) return;
+        CancelPendingSceneAction();
+        _world.Grabbed = null;
+        _toolDragging = false;
+        _editorTool = tool;
+        StatusUpdated?.Invoke(tool switch
+        {
+            EditorToolMode.Select => "Tool: Select — click an object to select or drag it.",
+            EditorToolMode.Move => "Tool: Move — click/drag the selected object on the floor plane.",
+            EditorToolMode.Rotate => "Tool: Rotate — click/drag horizontally to rotate around Y.",
+            EditorToolMode.Scale => "Tool: Scale — drag up/down or use mouse wheel on the selected object.",
+            _ => "Tool changed."
+        });
+        NotifyStateChanged();
+        Focus();
+    }
+
 
     // ================= per-frame update (driven by the form's idle loop) =================
     public void RenderFrame()
@@ -215,8 +500,11 @@ internal sealed class GlPanel : Control
         if (_stepOnce) { _world.Step(PhysicsWorld.FixedStep); _stepOnce = false; }
         else if (!_paused) _world.Step(_slowMo ? dt * 0.2f : dt);
 
+        float simDt = _paused ? 0f : (_slowMo ? dt * 0.2f : dt);
+        UpdateTriggers(simDt);
         SpawnEffectsFromWorld();
-        UpdateParticles(_paused ? 0f : (_slowMo ? dt * 0.2f : dt));
+        UpdateParticles(simDt);
+        UpdateChallenge(simDt);
 
         RenderShadowPass();
         RenderMainPass();
@@ -229,8 +517,10 @@ internal sealed class GlPanel : Control
             string flags = (_paused ? " [paused]" : "") + (_slowMo ? " [slow motion]" : "")
                          + (_zeroG ? " [0g]" : "") + (_waterOn ? " [water]" : "")
                          + (_world.Fields.Count > 0 ? " [field]" : "")
+                         + (_triggers.Count > 0 ? $" [triggers: {_triggers.Count}]" : "")
                          + (_pendingSceneAction != PendingSceneActionKind.None ? $" [click scene: {PendingSceneActionLabel()}]" : "");
-            StatusUpdated?.Invoke($"{_frames / _fpsTimer:F0} FPS    bodies: {_world.Bodies.Count}    active: {_world.AwakeCount}{flags}");
+            var challenge = ChallengeStatusText();
+            StatusUpdated?.Invoke($"{_frames / _fpsTimer:F0} FPS    bodies: {_world.Bodies.Count}    active: {_world.AwakeCount}{flags}{challenge}");
             _frames = 0;
             _fpsTimer = 0;
         }
@@ -366,10 +656,18 @@ internal sealed class GlPanel : Control
             {
                 UpdateAim();
                 if (!ExecutePendingSceneAction())
-                    StatusUpdated?.Invoke($"Click a valid point on the floor or on an object to place {PendingSceneActionLabel()}. Press Esc to cancel.");
+                {
+                    bool bodyTool = _pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect;
+                    StatusUpdated?.Invoke(bodyTool
+                        ? PendingSceneActionInstruction()
+                        : $"Click a valid point on the floor or on an object to place {PendingSceneActionLabel()}. Press Esc to cancel.");
+                }
                 return;
             }
-            TryGrab(e.X, e.Y);
+            if (_editorTool == EditorToolMode.Select)
+                TryGrab(e.X, e.Y);
+            else
+                TryStartEditorToolDrag(e.X, e.Y);
         }
         else if (e.Button == MouseButtons.Middle) ShootBall();
         else if (e.Button == MouseButtons.Right) _rmbDown = true;
@@ -378,14 +676,16 @@ internal sealed class GlPanel : Control
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
-        if (e.Button == MouseButtons.Left) _world.Grabbed = null;
+        if (e.Button == MouseButtons.Left) { _world.Grabbed = null; _toolDragging = false; }
         else if (e.Button == MouseButtons.Right) _rmbDown = false;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (_rmbDown)
+        if (_toolDragging)
+            UpdateEditorToolDrag(e.X, e.Y);
+        else if (_rmbDown)
         {
             _camYaw -= (e.X - _lastMouseX) * 0.008f;
             _camPitch += (e.Y - _lastMouseY) * 0.008f;
@@ -397,6 +697,11 @@ internal sealed class GlPanel : Control
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
+        if (_editorTool == EditorToolMode.Scale && _selectedBody != null)
+        {
+            ScaleSelectedBody(e.Delta > 0 ? 1.08f : 0.92f);
+            return;
+        }
         _camDist *= e.Delta > 0 ? 0.9f : 1.1f;
     }
 
@@ -426,6 +731,9 @@ internal sealed class GlPanel : Control
             case 0x5A: CancelPendingSceneAction(); AddField(ForceField.Kind.Attract); break; // Z
             case 0x58: CancelPendingSceneAction(); AddField(ForceField.Kind.Repel); break;   // X
             case 0x55: CancelPendingSceneAction(); AddField(ForceField.Kind.Wind); break;    // U
+            case 0x4A: ArmSceneAction(PendingSceneActionKind.Connect); break;         // J connect two bodies
+            case 0x4B: ArmSceneAction(PendingSceneActionKind.Spring); break;          // K spring-link two bodies
+            case 0x2E: ArmSceneAction(PendingSceneActionKind.Disconnect); break;      // Delete disconnect body
             case 0x20: CancelPendingSceneAction(); ShootBall(); break;               // Space
             case 0x46: CancelPendingSceneAction(); ShootBall(); break;               // F
             case 0x45: CancelPendingSceneAction(); Explode(); break;                 // E
@@ -435,7 +743,13 @@ internal sealed class GlPanel : Control
             case 0x42: StepOnce(); break;                // B
             case 0x43: CancelPendingSceneAction(); ClearDynamic(); break;            // C
             case 0x52: CancelPendingSceneAction(); Reset(); break;                   // R
+            case 0x51: SetEditorTool(EditorToolMode.Select); break; // Q
+            case 0x4D: SetEditorTool(EditorToolMode.Move); break;   // M
+            case 0x4F: SetEditorTool(EditorToolMode.Rotate); break; // O
+            case 0x53: SetEditorTool(EditorToolMode.Scale); break;  // S
             case 0x48: HelpRequested?.Invoke(); break;   // H
+            case 0x4E: NextLevel(); break;               // N  next campaign level
+            case 0x59: RetryLevel(); break;              // Y  retry campaign level
         }
     }
 
@@ -462,6 +776,10 @@ internal sealed class GlPanel : Control
         _uUvScale = GL.GetUniformLocation(_mainProgram, "uUvScale");
         _uAlpha = GL.GetUniformLocation(_mainProgram, "uAlpha");
         _uEmissive = GL.GetUniformLocation(_mainProgram, "uEmissive");
+        _uTime = GL.GetUniformLocation(_mainProgram, "uTime");
+        _uWaterWaveAmp = GL.GetUniformLocation(_mainProgram, "uWaterWaveAmp");
+        _uRippleCount = GL.GetUniformLocation(_mainProgram, "uRippleCount");
+        _uRipples = GL.GetUniformLocation(_mainProgram, "uRipples");
         _uShadowMap = GL.GetUniformLocation(_mainProgram, "uShadowMap");
 
         _dModel = GL.GetUniformLocation(_depthProgram, "uModel");
@@ -477,6 +795,7 @@ internal sealed class GlPanel : Control
         _sphereMesh = Mesh.CreateSphere();
         _capsuleMesh = Mesh.CreateCapsule();
         _planeMesh = Mesh.CreatePlane();
+        _waterMesh = Mesh.CreateGridPlane(64);
 
         // ---- shadow map FBO ----
         var tex = new uint[1];
@@ -505,15 +824,19 @@ internal sealed class GlPanel : Control
 
     private void ResetScene()
     {
+        SelectBody(null);
+        SelectTrigger(null);
         _world.Bodies.Clear();
         _world.Joints.Clear();
         _world.Fields.Clear();
         _world.Waters.Clear();
         _particles.Clear();
+        _triggers.Clear();
         _world.Grabbed = null;
         _zeroG = false;
         _waterOn = false;
         _world.Gravity = DefaultGravity;
+        ClearChallenge();
         AddWalls();
 
         // a small stack of boxes
@@ -528,6 +851,10 @@ internal sealed class GlPanel : Control
         var big = RigidBody.CreateBox(new Vector3(2.2f, 0.8f, -1.5f), new Vector3(0.8f, 0.8f, 0.8f));
         big.Color = Palette[4];
         _world.Bodies.Add(big);
+
+        // two different towers to knock over right away
+        AddBrickTower(new Vector3(6.5f, 0f, -3.5f), levels: 5, perRow: 3, bw: 0.42f);
+        AddPyramidTower(new Vector3(-6.5f, 0f, 4.5f), levels: 4, bw: 0.5f);
 
         // spheres dropping from above
         for (int i = 0; i < 3; i++)
@@ -583,6 +910,675 @@ internal sealed class GlPanel : Control
                 prev = link;
             }
         }
+    }
+
+    // --- tower builders (used by the default scene) ---
+    private void AddBrickTower(Vector3 baseCenter, int levels, int perRow, float bw)
+    {
+        // rows of bricks with alternating offset, like a little wall - topples satisfyingly
+        for (int level = 0; level < levels; level++)
+        {
+            float offset = (level % 2 == 0) ? 0f : bw;
+            for (int i = 0; i < perRow; i++)
+            {
+                float x = baseCenter.X + (i - (perRow - 1) / 2f) * (bw * 2f) + offset;
+                float y = baseCenter.Y + bw + level * (bw * 2f);
+                var b = RigidBody.CreateBox(new Vector3(x, y, baseCenter.Z), new Vector3(bw, bw, bw * 1.5f));
+                b.Color = Palette[(level + i) % Palette.Length];
+                _world.Bodies.Add(b);
+            }
+        }
+    }
+
+    private void AddPyramidTower(Vector3 baseCenter, int levels, float bw)
+    {
+        // classic tapering stack: wide base, single block on top
+        for (int level = 0; level < levels; level++)
+        {
+            int n = levels - level;
+            for (int i = 0; i < n; i++)
+            {
+                float x = baseCenter.X + (i - (n - 1) / 2f) * (bw * 2.05f);
+                float y = baseCenter.Y + bw + level * (bw * 2f);
+                var b = RigidBody.CreateBox(new Vector3(x, y, baseCenter.Z), new Vector3(bw));
+                b.Color = Palette[(level * 2 + i) % Palette.Length];
+                _world.Bodies.Add(b);
+            }
+        }
+    }
+
+    private void ResetToEmptyScene(bool zeroGravity = false, bool water = false)
+    {
+        SelectBody(null);
+        _world.Bodies.Clear();
+        _world.Joints.Clear();
+        _world.Fields.Clear();
+        _world.Waters.Clear();
+        _particles.Clear();
+        _triggers.Clear();
+        _world.Grabbed = null;
+        _jointFirstBody = null;
+        _zeroG = zeroGravity;
+        _waterOn = false;
+        _world.Gravity = zeroGravity ? Vector3.Zero : DefaultGravity;
+        ClearChallenge();
+        AddWalls();
+        if (water) ToggleWater();
+    }
+
+    private void LoadPresetScene(string presetName)
+    {
+        switch (presetName)
+        {
+            case "Domino Run":
+                BuildDominoRun();
+                break;
+            case "Tower Collapse":
+                BuildTowerCollapse();
+                break;
+            case "Bridge Test":
+                BuildBridgeTest();
+                break;
+            case "Catapult":
+                BuildCatapult();
+                break;
+            case "Newton Cradle":
+                BuildNewtonCradle();
+                break;
+            case "Zero-G Chaos":
+                BuildZeroGChaos();
+                break;
+            case "Water Playground":
+                BuildWaterPlayground();
+                break;
+            case "Trigger Playground":
+                BuildTriggerPlayground();
+                break;
+            default:
+                ResetScene();
+                break;
+        }
+    }
+
+    private void LoadChallengeScene(string challengeName)
+    {
+        switch (challengeName)
+        {
+            case "Hit the Target":
+                BuildHitTargetChallenge();
+                break;
+            case "Destroy the Tower":
+                BuildDestroyTowerChallenge();
+                break;
+            case "Bridge Endurance":
+                BuildBridgeEnduranceChallenge();
+                break;
+            case "Bowling Challenge":
+                BuildBowlingChallenge();
+                break;
+            case "Float or Sink":
+                BuildWaterSortingChallenge();
+                break;
+            default:
+                ClearChallenge();
+                break;
+        }
+    }
+
+    private void StartChallenge(ChallengeKind kind, string title, string goal, Vector3 target = default, float targetRadius = 0f)
+    {
+        _challengeKind = kind;
+        _challengeTitle = title;
+        _challengeGoal = goal;
+        _challengeMessage = goal;
+        _challengeTarget = target;
+        _challengeTargetRadius = targetRadius;
+        _challengeTimer = 0f;
+        _challengeSuccess = false;
+        _challengeFailed = false;
+        _challengeScore = 0;
+        _challengeStartCount = _challengeBodies.Count;
+        StatusUpdated?.Invoke($"Challenge: {title} — {goal}");
+    }
+
+    private void ClearChallenge()
+    {
+        _challengeKind = ChallengeKind.None;
+        _challengeTitle = "";
+        _challengeGoal = "";
+        _challengeMessage = "";
+        _challengeTimer = 0f;
+        _challengeSuccess = false;
+        _challengeFailed = false;
+        _challengeTarget = Vector3.Zero;
+        _challengeTargetRadius = 0f;
+        _challengeStartCount = 0;
+        _challengeScore = 0;
+        _challengeBodies.Clear();
+        _levelIndex = -1;
+        _shotsThisLevel = 0;
+    }
+
+    private void CompleteChallenge(string message)
+    {
+        if (_challengeSuccess || _challengeFailed) return;
+        _challengeSuccess = true;
+        _challengeMessage = "SUCCESS: " + message;
+        StatusUpdated?.Invoke($"Challenge complete: {_challengeTitle} — {message}");
+
+        // campaign scoring: rate the attempt, store the best result, unlock the next level
+        if (_levelIndex >= 0 && _levelIndex < LevelCatalog.Count)
+        {
+            var def = LevelCatalog.At(_levelIndex);
+            var result = new ChallengeResult
+            {
+                Success = true,
+                TimeSeconds = _challengeTimer,
+                Shots = _shotsThisLevel,
+                Score = _challengeScore,
+                StartCount = _challengeStartCount,
+            };
+            int stars = def.StarRule(result);
+            if (_campaign.Record(def.Id, stars)) _campaign.Save();
+            _challengeMessage = $"LEVEL COMPLETE  {StarString(stars)}  —  {message}";
+            StatusUpdated?.Invoke($"Level complete: {def.Title}  {StarString(stars)}");
+            LevelCompleted?.Invoke(_levelIndex);
+            NotifyStateChanged();
+        }
+    }
+
+    private static string StarString(int stars)
+    {
+        stars = Math.Clamp(stars, 0, 3);
+        return new string('★', stars) + new string('☆', 3 - stars);
+    }
+
+    // ================= campaign API (level select / progression) =================
+    public int CampaignLevelCount => LevelCatalog.Count;
+    public int CurrentLevelIndex => _levelIndex;
+    public int CampaignTotalStars => _campaign.TotalStars;
+    public bool IsLevelUnlocked(int index) => _campaign.IsUnlocked(index);
+    public int LevelStars(int index)
+        => index >= 0 && index < LevelCatalog.Count ? _campaign.BestStars(LevelCatalog.At(index).Id) : 0;
+    public string LevelTitle(int index)
+        => index >= 0 && index < LevelCatalog.Count ? LevelCatalog.At(index).Title : "";
+    public string LevelGoal(int index)
+        => index >= 0 && index < LevelCatalog.Count ? LevelCatalog.At(index).Goal : "";
+    public string LevelStarHint(int index)
+        => index >= 0 && index < LevelCatalog.Count ? LevelCatalog.At(index).StarHint : "";
+
+    public void StartCampaignLevel(int index)
+    {
+        if (!_initialized) return;
+        if (index < 0 || index >= LevelCatalog.Count) return;
+        if (!_campaign.IsUnlocked(index)) return;
+
+        CancelPendingSceneAction();
+        SelectBody(null);
+        SelectTrigger(null);
+        _levelIndex = index;        // set before building so CompleteChallenge can score it
+        _shotsThisLevel = 0;
+        LoadChallengeScene(LevelCatalog.At(index).SceneName);
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void NextLevel()
+    {
+        if (_levelIndex < 0) return;
+        int next = _levelIndex + 1;
+        if (next < LevelCatalog.Count && _campaign.IsUnlocked(next))
+            StartCampaignLevel(next);
+    }
+
+    public void RetryLevel()
+    {
+        if (_levelIndex >= 0) StartCampaignLevel(_levelIndex);
+    }
+
+    private void FailChallenge(string message)
+    {
+        if (_challengeSuccess || _challengeFailed) return;
+        _challengeFailed = true;
+        _challengeMessage = "FAILED: " + message;
+        StatusUpdated?.Invoke($"Challenge failed: {_challengeTitle} — {message}");
+    }
+
+    private string ChallengeStatusText()
+    {
+        if (_challengeKind == ChallengeKind.None) return "";
+        string state = _challengeSuccess ? "success" : _challengeFailed ? "failed" : $"{_challengeTimer:0.0}s";
+        return $"    challenge: {_challengeTitle} [{state}] {_challengeMessage}";
+    }
+
+    private void UpdateChallenge(float dt)
+    {
+        if (_challengeKind == ChallengeKind.None || _challengeSuccess || _challengeFailed) return;
+        if (dt > 0f) _challengeTimer += dt;
+
+        switch (_challengeKind)
+        {
+            case ChallengeKind.HitTarget:
+                _challengeScore = _world.Bodies.Count(b => b.UserObject && !b.IsStatic && Vector3.Distance(b.Position, _challengeTarget) <= _challengeTargetRadius);
+                _challengeMessage = $"Move any object into the target zone. Objects inside: {_challengeScore}.";
+                if (_challengeScore > 0) CompleteChallenge("an object reached the target zone");
+                break;
+
+            case ChallengeKind.TowerDestroyer:
+                int fallen = _challengeBodies.Count(b => b.Position.Y < 0.75f || MathF.Abs(b.Position.X) > 2.2f || MathF.Abs(b.Position.Z) > 2.2f);
+                _challengeScore = fallen;
+                _challengeMessage = $"Destroy at least 70% of the tower. Fallen/scattered: {fallen}/{_challengeStartCount}.";
+                if (_challengeStartCount > 0 && fallen >= _challengeStartCount * 0.70f) CompleteChallenge("the tower is mostly destroyed");
+                break;
+
+            case ChallengeKind.BridgeEndurance:
+                bool cargoDropped = _challengeBodies.Any(b => b.Position.Y < 0.75f);
+                _challengeMessage = $"Keep the cargo on the bridge for 10 seconds. Time: {_challengeTimer:0.0}/10.0.";
+                if (cargoDropped) FailChallenge("cargo fell below the bridge");
+                else if (_challengeTimer >= 10f) CompleteChallenge("the bridge held the load for 10 seconds");
+                break;
+
+            case ChallengeKind.Bowling:
+                int knocked = _challengeBodies.Count(b => b.Position.Y < 0.55f || Vector3.Dot(Vector3.Transform(Vector3.UnitY, b.Rotation), Vector3.UnitY) < 0.65f);
+                _challengeScore = knocked;
+                _challengeMessage = $"Knock down at least 8 pins. Knocked: {knocked}/{_challengeStartCount}.";
+                if (knocked >= 8) CompleteChallenge("enough pins were knocked down");
+                break;
+
+            case ChallengeKind.WaterSorting:
+                int floatersOk = _challengeBodies.Count(b => b.Density < 1f && b.Position.Y > 1.15f);
+                int sinkersOk = _challengeBodies.Count(b => b.Density >= 1f && b.Position.Y < 1.0f);
+                _challengeScore = floatersOk + sinkersOk;
+                _challengeMessage = $"Wait until light objects float and heavy objects sink: {_challengeScore}/{_challengeStartCount}.";
+                if (_challengeTimer > 8f && _challengeScore >= Math.Max(1, _challengeStartCount - 1)) CompleteChallenge("objects sorted themselves by density");
+                break;
+        }
+    }
+
+    private void BuildHitTargetChallenge()
+    {
+        ResetToEmptyScene();
+        var target = new Vector3(7.0f, 1.0f, 0f);
+        for (int i = 0; i < 5; i++)
+        {
+            var ball = RigidBody.CreateSphere(new Vector3(-5f + i * 0.6f, 1.0f + i * 0.25f, -1.5f + i * 0.7f), 0.35f, density: 1.2f);
+            ball.Restitution = 0.55f;
+            AddBody(ball, Palette[i % Palette.Length]);
+        }
+        var ramp = RigidBody.CreateStaticBox(new Vector3(0.5f, 0.28f, 0f), new Vector3(2.2f, 0.14f, 1.2f));
+        ramp.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.18f);
+        ramp.UpdateDerived();
+        ramp.Color = new Vector3(0.35f, 0.35f, 0.38f);
+        _world.Bodies.Add(ramp);
+        StartChallenge(ChallengeKind.HitTarget, "Hit the Target", "Move any object into the glowing target zone.", target, 1.15f);
+    }
+
+    private void BuildDestroyTowerChallenge()
+    {
+        ResetToEmptyScene();
+        _challengeBodies.Clear();
+        const int levels = 7;
+        for (int y = 0; y < levels; y++)
+        {
+            for (int x = -2; x <= 2; x++)
+            {
+                for (int z = -2; z <= 2; z++)
+                {
+                    if (Math.Abs(x) == 2 || Math.Abs(z) == 2 || y % 2 == 0)
+                    {
+                        var b = MakeBreakable(RigidBody.CreateBox(new Vector3(x * 0.55f, 0.28f + y * 0.56f, z * 0.55f), new Vector3(0.25f), density: 1.0f), threshold: 5.8f);
+                        b.Friction = 0.65f;
+                        AddBody(b, Palette[Math.Abs(x + z + y + 20) % Palette.Length]);
+                        _challengeBodies.Add(b);
+                    }
+                }
+            }
+        }
+        var ball = RigidBody.CreateSphere(new Vector3(-8.0f, 2.6f, 0f), 0.75f, density: 7f);
+        ball.Velocity = new Vector3(10.5f, 0.1f, 0f);
+        AddBody(ball, new Vector3(0.15f, 0.15f, 0.18f));
+        StartChallenge(ChallengeKind.TowerDestroyer, "Destroy the Tower", "Destroy at least 70% of the tower blocks.");
+    }
+
+    private void BuildBridgeEnduranceChallenge()
+    {
+        BuildBridgeTest();
+        _challengeBodies.Clear();
+        foreach (var b in _world.Bodies.Where(b => b.UserObject && !b.IsStatic && b.Position.Y > 2.0f))
+            _challengeBodies.Add(b);
+        StartChallenge(ChallengeKind.BridgeEndurance, "Bridge Endurance", "Keep the cargo above the bridge for 10 seconds.");
+    }
+
+    private void BuildBowlingChallenge()
+    {
+        ResetToEmptyScene();
+        _challengeBodies.Clear();
+        for (int row = 0; row < 4; row++)
+        {
+            for (int col = 0; col <= row; col++)
+            {
+                float x = (col - row * 0.5f) * 0.55f;
+                float z = 3.8f + row * 0.55f;
+                var pin = RigidBody.CreateCapsule(new Vector3(x, 0.65f, z), 0.18f, density: 0.55f);
+                pin.Restitution = 0.35f;
+                AddBody(pin, new Vector3(0.95f, 0.92f, 0.85f));
+                _challengeBodies.Add(pin);
+            }
+        }
+        var ball = RigidBody.CreateSphere(new Vector3(0f, 0.55f, -5.0f), 0.45f, density: 6f);
+        ball.Velocity = new Vector3(0f, 0f, 8.5f);
+        ball.Restitution = 0.35f;
+        AddBody(ball, new Vector3(0.12f, 0.12f, 0.14f));
+        StartChallenge(ChallengeKind.Bowling, "Bowling Challenge", "Knock down at least 8 of 10 pins.");
+    }
+
+    private void BuildWaterSortingChallenge()
+    {
+        ResetToEmptyScene(water: true);
+        _challengeBodies.Clear();
+        for (int i = 0; i < 8; i++)
+        {
+            bool light = i % 2 == 0;
+            var box = RigidBody.CreateBox(new Vector3(-3.5f + i, 3.2f + i * 0.2f, -0.6f), new Vector3(0.33f), density: light ? 0.35f : 1.75f);
+            box.Friction = 0.35f;
+            AddBody(box, light ? new Vector3(0.25f, 0.75f, 0.35f) : new Vector3(0.55f, 0.35f, 0.18f));
+            _challengeBodies.Add(box);
+        }
+        StartChallenge(ChallengeKind.WaterSorting, "Float or Sink", "Light objects should float while heavy objects sink.");
+    }
+
+    private void AddBody(RigidBody body, Vector3 color)
+    {
+        body.Color = color;
+        _world.Bodies.Add(body);
+    }
+
+    private static RigidBody MakeBreakable(RigidBody body, float threshold = 6.5f, int pieces = 8)
+    {
+        body.Breakable = true;
+        body.BreakThreshold = threshold;
+        body.BreakPieces = pieces;
+        return body;
+    }
+
+    private static Joint MakePointJoint(RigidBody a, RigidBody? b, Vector3 localA, Vector3 localBOrWorld)
+        => new() { Type = Joint.Kind.Point, A = a, B = b, LocalA = localA, LocalB = localBOrWorld };
+
+    private static Joint MakeSpring(RigidBody a, RigidBody b, float stiffness = 22f, float damping = 2.4f)
+    {
+        float len = Vector3.Distance(a.Position, b.Position);
+        return new Joint
+        {
+            Type = Joint.Kind.Spring,
+            A = a,
+            B = b,
+            LocalA = Vector3.Zero,
+            LocalB = Vector3.Zero,
+            Length = len,
+            Stiffness = stiffness,
+            Damping = damping,
+        };
+    }
+
+    private void BuildDominoRun()
+    {
+        ResetToEmptyScene();
+
+        const int count = 34;
+        for (int i = 0; i < count; i++)
+        {
+            float u = i / (float)(count - 1);
+            float x = -8.5f + u * 17f;
+            float z = MathF.Sin(u * MathF.PI * 2.0f) * 2.2f;
+            float dx = 17f / (count - 1);
+            float dz = MathF.Cos(u * MathF.PI * 2.0f) * 2.2f * MathF.PI * 2.0f / (count - 1);
+            float yaw = MathF.Atan2(dx, dz) + MathF.PI * 0.5f;
+            var d = RigidBody.CreateBox(new Vector3(x, 0.8f, z), new Vector3(0.075f, 0.8f, 0.32f), density: 0.75f);
+            d.Rotation = Quaternion.CreateFromYawPitchRoll(yaw, 0f, 0f);
+            d.Friction = 0.75f;
+            d.Restitution = 0.1f;
+            d.UpdateDerived();
+            AddBody(d, Palette[i % Palette.Length]);
+        }
+
+        var striker = RigidBody.CreateSphere(new Vector3(-10.2f, 0.45f, 0f), 0.42f, density: 5f);
+        striker.Velocity = new Vector3(8.0f, 0f, 0.8f);
+        striker.Restitution = 0.25f;
+        AddBody(striker, new Vector3(1.0f, 0.35f, 0.2f));
+    }
+
+    private void BuildTowerCollapse()
+    {
+        ResetToEmptyScene();
+
+        const int levels = 8;
+        for (int y = 0; y < levels; y++)
+        {
+            for (int x = -2; x <= 2; x++)
+            {
+                for (int z = -2; z <= 2; z++)
+                {
+                    if (Math.Abs(x) == 2 || Math.Abs(z) == 2 || y % 2 == 0)
+                    {
+                        var b = MakeBreakable(RigidBody.CreateBox(new Vector3(x * 0.55f, 0.28f + y * 0.56f, z * 0.55f), new Vector3(0.25f, 0.25f, 0.25f), density: 1.1f), threshold: 5.8f);
+                        b.Friction = 0.65f;
+                        b.Restitution = 0.08f;
+                        AddBody(b, Palette[Math.Abs(x + z + y + 20) % Palette.Length]);
+                    }
+                }
+            }
+        }
+
+        var wreckingBall = RigidBody.CreateSphere(new Vector3(-8f, 3.0f, 0f), 0.75f, density: 8f);
+        wreckingBall.Velocity = new Vector3(12.5f, 0.1f, 0f);
+        wreckingBall.Restitution = 0.2f;
+        AddBody(wreckingBall, new Vector3(0.15f, 0.15f, 0.18f));
+    }
+
+    private void BuildBridgeTest()
+    {
+        ResetToEmptyScene();
+
+        var left = RigidBody.CreateStaticBox(new Vector3(-4.8f, 0.45f, 0f), new Vector3(0.6f, 0.45f, 1.5f));
+        left.Color = new Vector3(0.25f, 0.27f, 0.30f);
+        _world.Bodies.Add(left);
+        var right = RigidBody.CreateStaticBox(new Vector3(4.8f, 0.45f, 0f), new Vector3(0.6f, 0.45f, 1.5f));
+        right.Color = new Vector3(0.25f, 0.27f, 0.30f);
+        _world.Bodies.Add(right);
+
+        var planks = new List<RigidBody>();
+        const int n = 9;
+        for (int i = 0; i < n; i++)
+        {
+            float x = -3.6f + i * 0.9f;
+            var p = RigidBody.CreateBox(new Vector3(x, 1.15f, 0f), new Vector3(0.43f, 0.09f, 1.05f), density: 0.7f);
+            p.Friction = 0.85f;
+            p.Restitution = 0.05f;
+            AddBody(p, new Vector3(0.55f, 0.34f, 0.17f));
+            planks.Add(p);
+        }
+
+        // pin both ends to the abutments at both edges so the deck can't twist out
+        const float zEdge = 0.9f;
+        foreach (float z in new[] { -zEdge, zEdge })
+        {
+            _world.Joints.Add(MakePointJoint(planks[0],  null, new Vector3(-0.43f, 0f, z), new Vector3(-4.05f, 1.15f, z)));
+            _world.Joints.Add(MakePointJoint(planks[^1], null, new Vector3( 0.43f, 0f, z), new Vector3( 4.05f, 1.15f, z)));
+        }
+
+        // rigid hinge links between adjacent planks, two per seam so the deck stays flat.
+        // (Springs let it sag and pull apart under load - that's why it used to collapse.)
+        for (int i = 0; i < planks.Count - 1; i++)
+            foreach (float z in new[] { -zEdge, zEdge })
+                _world.Joints.Add(MakePointJoint(planks[i], planks[i + 1], new Vector3(0.43f, 0f, z), new Vector3(-0.43f, 0f, z)));
+
+        // cargo to carry - lighter than before so a real bridge can actually hold it
+        for (int i = 0; i < 5; i++)
+        {
+            var load = RigidBody.CreateSphere(new Vector3(-2.0f + i * 1.0f, 3.0f + i * 0.25f, 0f), 0.35f, density: 2.4f);
+            AddBody(load, new Vector3(0.25f, 0.45f, 0.85f));
+        }
+    }
+
+    private void BuildCatapult()
+    {
+        ResetToEmptyScene();
+
+        var baseBox = RigidBody.CreateStaticBox(new Vector3(-2.0f, 0.22f, 0f), new Vector3(1.3f, 0.22f, 0.75f));
+        baseBox.Color = new Vector3(0.28f, 0.24f, 0.20f);
+        _world.Bodies.Add(baseBox);
+
+        var arm = RigidBody.CreateBox(new Vector3(-2.0f, 0.95f, 0f), new Vector3(2.2f, 0.10f, 0.22f), density: 1.0f);
+        arm.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.25f);
+        arm.Friction = 0.7f;
+        arm.UpdateDerived();
+        AddBody(arm, new Vector3(0.55f, 0.34f, 0.18f));
+
+        _world.Joints.Add(MakePointJoint(arm, null, new Vector3(-0.35f, 0f, 0f), new Vector3(-2.35f, 0.72f, 0f)));
+
+        // counterweight: moderate mass and NO initial velocity. A density-8 weight with a
+        // downward kick on a long single-pivot lever overwhelmed the solver and flung apart.
+        var weight = RigidBody.CreateBox(new Vector3(-4.0f, 1.45f, 0f), new Vector3(0.45f), density: 2.5f);
+        AddBody(weight, new Vector3(0.18f, 0.18f, 0.18f));
+        _world.Joints.Add(MakePointJoint(weight, arm, Vector3.Zero, new Vector3(-1.8f, 0f, 0f)));
+
+        var projectile = RigidBody.CreateSphere(new Vector3(-0.15f, 1.55f, 0f), 0.32f, density: 1.2f);
+        projectile.Restitution = 0.3f;
+        AddBody(projectile, new Vector3(1.0f, 0.82f, 0.22f));
+
+        var target = RigidBody.CreateBox(new Vector3(5.5f, 0.7f, 0f), new Vector3(0.25f, 0.7f, 1.1f), density: 0.65f);
+        AddBody(target, new Vector3(0.8f, 0.2f, 0.2f));
+    }
+
+    private void BuildNewtonCradle()
+    {
+        ResetToEmptyScene();
+
+        var frame = RigidBody.CreateStaticBox(new Vector3(0f, 4.3f, 0f), new Vector3(3.3f, 0.12f, 0.12f));
+        frame.Color = new Vector3(0.35f, 0.35f, 0.38f);
+        _world.Bodies.Add(frame);
+
+        const int n = 5;
+        for (int i = 0; i < n; i++)
+        {
+            float x = (i - 2) * 0.62f;
+            var ball = RigidBody.CreateSphere(new Vector3(x, 2.15f, 0f), 0.30f, density: 6f);
+            ball.Restitution = 0.95f;
+            ball.Friction = 0.15f;
+            if (i == 0)
+            {
+                ball.Position += new Vector3(-1.25f, 0.55f, 0f);
+                ball.Velocity = new Vector3(2.2f, 0f, 0f);
+            }
+            AddBody(ball, i == 0 ? new Vector3(1f, 0.55f, 0.25f) : new Vector3(0.75f, 0.80f, 0.86f));
+            _world.Joints.Add(new Joint
+            {
+                Type = Joint.Kind.Distance,
+                A = ball,
+                B = null,
+                LocalA = Vector3.Zero,
+                LocalB = new Vector3(x, 4.05f, 0f),
+                Length = Vector3.Distance(ball.Position, new Vector3(x, 4.05f, 0f)),
+            });
+        }
+    }
+
+    private void BuildZeroGChaos()
+    {
+        ResetToEmptyScene(zeroGravity: true);
+
+        for (int i = 0; i < 32; i++)
+        {
+            float x = (float)(_rng.NextDouble() * 14 - 7);
+            float y = (float)(_rng.NextDouble() * 5 + 1.2);
+            float z = (float)(_rng.NextDouble() * 14 - 7);
+            RigidBody b = i % 3 == 0
+                ? RigidBody.CreateSphere(new Vector3(x, y, z), 0.25f + (float)_rng.NextDouble() * 0.35f)
+                : RigidBody.CreateBox(new Vector3(x, y, z), new Vector3(0.25f + (float)_rng.NextDouble() * 0.35f));
+            b.Velocity = new Vector3((float)_rng.NextDouble() * 5f - 2.5f, (float)_rng.NextDouble() * 5f - 2.5f, (float)_rng.NextDouble() * 5f - 2.5f);
+            b.AngularVelocity = new Vector3((float)_rng.NextDouble() * 4f, (float)_rng.NextDouble() * 4f, (float)_rng.NextDouble() * 4f);
+            b.Restitution = 0.75f;
+            AddBody(b, Palette[i % Palette.Length]);
+        }
+
+        _world.Fields.Add(new ForceField { Type = ForceField.Kind.Attract, Position = new Vector3(0f, 2.6f, 0f), Radius = 8.0f, Strength = 8.5f });
+    }
+
+    private void BuildWaterPlayground()
+    {
+        ResetToEmptyScene(water: true);
+
+        for (int i = 0; i < 10; i++)
+        {
+            float x = -4.5f + i;
+            var floater = RigidBody.CreateBox(new Vector3(x, 4.0f + i * 0.2f, -1.2f), new Vector3(0.35f, 0.25f, 0.35f), density: i % 2 == 0 ? 0.35f : 1.8f);
+            floater.Restitution = 0.25f;
+            floater.Friction = 0.35f;
+            AddBody(floater, i % 2 == 0 ? new Vector3(0.25f, 0.75f, 0.35f) : new Vector3(0.55f, 0.35f, 0.18f));
+        }
+
+        var ball = RigidBody.CreateSphere(new Vector3(0f, 6.0f, 2.3f), 0.7f, density: 0.55f);
+        ball.Restitution = 0.6f;
+        AddBody(ball, new Vector3(0.9f, 0.9f, 0.25f));
+    }
+
+    private void BuildTriggerPlayground()
+    {
+        ResetToEmptyScene();
+
+        // One clear left-to-right lane along z = 0 so cause and effect are obvious:
+        // a ball rolls down the ramp, the WIND plate scatters light crates out of its path,
+        // then the EXPLOSION plate (aimed at the wall) demolishes the brick wall ahead.
+
+        var ramp = RigidBody.CreateStaticBox(new Vector3(-6.0f, 1.3f, 0f), new Vector3(2.2f, 0.12f, 0.7f));
+        ramp.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.22f); // high on the left, rolls toward +X
+        ramp.UpdateDerived();
+        ramp.Color = new Vector3(0.42f, 0.42f, 0.48f);
+        _world.Bodies.Add(ramp);
+
+        // heavy balls that roll the length of the lane, one after another
+        for (int i = 0; i < 3; i++)
+        {
+            var ball = RigidBody.CreateSphere(new Vector3(-7.3f, 2.9f + i * 0.7f, 0f), 0.3f, density: 2.5f);
+            ball.Restitution = 0.25f;
+            AddBody(ball, new Vector3(0.95f, 0.85f, 0.25f));
+        }
+
+        // light crates sitting in the lane, to be blown aside when the wind plate fires
+        for (int i = 0; i < 5; i++)
+        {
+            var crate = RigidBody.CreateBox(new Vector3(-1.8f + (i % 2) * 0.5f, 0.3f + (i / 2) * 0.55f, 0f), new Vector3(0.26f), density: 0.3f);
+            crate.Friction = 0.4f;
+            AddBody(crate, new Vector3(0.3f, 0.7f, 0.45f));
+        }
+
+        // brick wall facing the lane, to be demolished by the explosion plate
+        for (int y = 0; y < 4; y++)
+        for (int z = -2; z <= 2; z++)
+        {
+            var block = MakeBreakable(RigidBody.CreateBox(new Vector3(2.4f, 0.25f + y * 0.5f, z * 0.5f), new Vector3(0.22f, 0.24f, 0.22f), density: 1.0f), threshold: 5.0f);
+            AddBody(block, new Vector3(0.82f, 0.35f, 0.25f));
+        }
+
+        _triggers.Add(new SceneTrigger
+        {
+            Name = "Wind plate",
+            Position = new Vector3(-3.5f, 0.08f, 0f),
+            HalfExtents = new Vector3(0.8f, 0.06f, 0.9f),
+            Action = TriggerActionKind.Wind,
+            Strength = 14f,
+        });
+        _triggers.Add(new SceneTrigger
+        {
+            Name = "Explosion plate",
+            Position = new Vector3(0.4f, 0.08f, 0f),
+            HalfExtents = new Vector3(0.8f, 0.06f, 0.9f),
+            Action = TriggerActionKind.Explosion,
+            TargetPosition = new Vector3(2.4f, 0.7f, 0f), // aim the blast at the wall, not the plate
+            OneShot = true,
+        });
+
+        StatusUpdated?.Invoke("Trigger Playground: the ball rolls right - the wind plate scatters the crates, then the explosion plate blows up the wall.");
     }
 
     private void AddWalls()
@@ -734,12 +1730,15 @@ internal sealed class GlPanel : Control
         ball.Velocity = dir * MuzzleSpeed;
         ball.Color = new Vector3(0.95f, 0.95f, 0.97f); // pale "steel" shot
         _world.Bodies.Add(ball);
+        if (_levelIndex >= 0) _shotsThisLevel++; // counts toward the level's star rating
     }
 
     private void Explode()
     {
         if (!_aimValid) return;
         _world.ApplyExplosion(_aimPoint, radius: 5f, strength: 9f);
+        SpawnExplosionFeedback(_aimPoint, 5f);
+        PlayExplosionSound();
     }
 
     private void ToggleGravity()
@@ -760,7 +1759,10 @@ internal sealed class GlPanel : Control
 
         _pendingSceneAction = action;
         _pendingSpawnKind = spawnKind;
-        StatusUpdated?.Invoke($"Click inside the scene to place {PendingSceneActionLabel()}. Press Esc to cancel.");
+        _jointFirstBody = null;
+        _jointFirstLocal = Vector3.Zero;
+        _jointFirstWorld = Vector3.Zero;
+        StatusUpdated?.Invoke(PendingSceneActionInstruction());
         NotifyStateChanged();
     }
 
@@ -769,6 +1771,9 @@ internal sealed class GlPanel : Control
         if (_pendingSceneAction == PendingSceneActionKind.None) return;
         _pendingSceneAction = PendingSceneActionKind.None;
         _pendingSpawnKind = 0;
+        _jointFirstBody = null;
+        _jointFirstLocal = Vector3.Zero;
+        _jointFirstWorld = Vector3.Zero;
         NotifyStateChanged();
     }
 
@@ -794,6 +1799,9 @@ internal sealed class GlPanel : Control
     private bool ExecutePendingSceneAction()
     {
         if (_pendingSceneAction == PendingSceneActionKind.None) return false;
+
+        if (_pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect)
+            return ExecuteJointTool(_pendingSceneAction);
 
         if (!_aimValid) return false;
 
@@ -822,6 +1830,9 @@ internal sealed class GlPanel : Control
             case PendingSceneActionKind.Repeller:
                 AddField(ForceField.Kind.Repel);
                 break;
+            case PendingSceneActionKind.Wind:
+                AddField(ForceField.Kind.Wind);
+                break;
             default:
                 return false;
         }
@@ -849,15 +1860,98 @@ internal sealed class GlPanel : Control
         PendingSceneActionKind.Explosion => "explosion",
         PendingSceneActionKind.Attractor => "attractor",
         PendingSceneActionKind.Repeller => "repeller",
+        PendingSceneActionKind.Wind => "wind",
+        PendingSceneActionKind.Connect => "connect",
+        PendingSceneActionKind.Spring => "spring",
+        PendingSceneActionKind.Disconnect => "disconnect",
         _ => "tool",
     };
 
+    private string PendingSceneActionInstruction() => _pendingSceneAction switch
+    {
+        PendingSceneActionKind.Connect => "Connect: click first object, then click second object. Esc cancels.",
+        PendingSceneActionKind.Spring => "Spring: click first object, then click second object. Esc cancels.",
+        PendingSceneActionKind.Disconnect => "Disconnect: click an object to remove all its links/springs. Esc cancels.",
+        _ => $"Click inside the scene to place {PendingSceneActionLabel()}. Press Esc to cancel.",
+    };
+
+    private bool ExecuteJointTool(PendingSceneActionKind action)
+    {
+        var (origin, dir) = MouseRay(_lastMouseX, _lastMouseY);
+        var body = _world.RayCast(origin, dir, out _, out var hitPoint);
+        if (body == null)
+        {
+            StatusUpdated?.Invoke(action == PendingSceneActionKind.Disconnect
+                ? "Disconnect: click an object with links/springs. Esc cancels."
+                : $"{PendingSceneActionLabel()}: click an object first. Esc cancels.");
+            return false;
+        }
+
+        if (action == PendingSceneActionKind.Disconnect)
+        {
+            int removed = _world.Joints.RemoveAll(j => j.Involves(body));
+            if (removed > 0) body.Wake();
+            StatusUpdated?.Invoke(removed == 0 ? "This object has no links/springs." : $"Removed {removed} link(s)/spring(s).");
+            _pendingSceneAction = PendingSceneActionKind.None;
+            _jointFirstBody = null;
+            NotifyStateChanged();
+            return true;
+        }
+
+        if (_jointFirstBody == null)
+        {
+            _jointFirstBody = body;
+            _jointFirstWorld = hitPoint;
+            _jointFirstLocal = Vector3.Transform(hitPoint - body.Position, Quaternion.Conjugate(body.Rotation));
+            body.Wake();
+            StatusUpdated?.Invoke($"{PendingSceneActionLabel()}: first object selected. Click the second object. Esc cancels.");
+            NotifyStateChanged();
+            return true;
+        }
+
+        if (body == _jointFirstBody)
+        {
+            StatusUpdated?.Invoke($"{PendingSceneActionLabel()}: click a different second object. Esc cancels.");
+            return false;
+        }
+
+        var localB = Vector3.Transform(hitPoint - body.Position, Quaternion.Conjugate(body.Rotation));
+        float length = Vector3.Distance(_jointFirstWorld, hitPoint);
+        if (length < 0.25f) length = Vector3.Distance(_jointFirstBody.Position, body.Position);
+        if (length < 0.25f) length = 0.25f;
+
+        _world.Joints.Add(new Joint
+        {
+            Type = action == PendingSceneActionKind.Spring ? Joint.Kind.Spring : Joint.Kind.Distance,
+            A = _jointFirstBody,
+            B = body,
+            LocalA = _jointFirstLocal,
+            LocalB = localB,
+            Length = length,
+            Stiffness = action == PendingSceneActionKind.Spring ? 22f : 18f,
+            Damping = action == PendingSceneActionKind.Spring ? 2.6f : 2.2f,
+        });
+
+        _jointFirstBody.Wake();
+        body.Wake();
+        StatusUpdated?.Invoke(action == PendingSceneActionKind.Spring ? "Spring created." : "Objects connected.");
+        _pendingSceneAction = PendingSceneActionKind.None;
+        _jointFirstBody = null;
+        NotifyStateChanged();
+        return true;
+    }
+
     private void ClearDynamic()
     {
+        SelectBody(null);
+        SelectTrigger(null);
         _world.Grabbed = null;
         _world.Joints.Clear();
         _world.Bodies.RemoveAll(b => !b.IsStatic);
         _particles.Clear();
+        _waterTouchState.Clear();
+        _triggers.Clear();
+        ClearChallenge();
     }
 
     private void EvictIfFull()
@@ -865,6 +1959,105 @@ internal sealed class GlPanel : Control
         if (_world.Bodies.Count < MaxBodies) return;
         var oldest = _world.Bodies.FirstOrDefault(b => !b.IsStatic && b != _world.Grabbed);
         if (oldest != null) _world.RemoveBody(oldest);
+    }
+
+    // ---- triggers / sensors ----
+
+    private void UpdateTriggers(float dt)
+    {
+        if (dt <= 0f || _triggers.Count == 0) return;
+
+        foreach (var tr in _triggers)
+        {
+            if (!tr.Enabled) continue;
+            if (tr.Cooldown > 0f) tr.Cooldown -= dt;
+            if (tr.Pulse > 0f) tr.Pulse = MathF.Max(0f, tr.Pulse - dt * 1.8f);
+
+            bool pressed = IsTriggerPressed(tr);
+            if (pressed && !tr.WasPressed && tr.Cooldown <= 0f)
+                FireTrigger(tr);
+            tr.WasPressed = pressed;
+        }
+    }
+
+    private bool IsTriggerPressed(SceneTrigger tr)
+    {
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic || !b.UserObject) continue;
+            var p = b.Position;
+            float margin = MathF.Max(0.15f, MathF.Min(0.7f, b.BoundingRadius * 0.35f));
+            if (p.X < tr.Position.X - tr.HalfExtents.X - margin || p.X > tr.Position.X + tr.HalfExtents.X + margin) continue;
+            if (p.Z < tr.Position.Z - tr.HalfExtents.Z - margin || p.Z > tr.Position.Z + tr.HalfExtents.Z + margin) continue;
+            if (p.Y > tr.Position.Y + 1.3f + b.BoundingRadius) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private void FireTrigger(SceneTrigger tr)
+    {
+        tr.Cooldown = tr.CooldownSeconds;
+        tr.Pulse = 1.0f;
+        if (tr.OneShot) tr.Enabled = false;
+
+        switch (tr.Action)
+        {
+            case TriggerActionKind.Explosion:
+                ApplyExplosionAt(tr.TargetPosition + new Vector3(0, 0.25f, 0), radius: tr.Radius, strength: tr.Strength);
+                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> explosion");
+                break;
+            case TriggerActionKind.Wind:
+                _world.Fields.Clear();
+                _world.Fields.Add(new ForceField
+                {
+                    Type = ForceField.Kind.Wind,
+                    Position = tr.TargetPosition + new Vector3(0, 1.6f, 0),
+                    Radius = tr.Radius,
+                    Strength = tr.Strength,
+                    WindDir = Vector3.UnitX,
+                });
+                foreach (var b in _world.Bodies) b.Wake();
+                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> wind field");
+                break;
+            case TriggerActionKind.ToggleGravity:
+                ToggleGravity();
+                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> gravity toggled");
+                break;
+            case TriggerActionKind.ToggleAttractor:
+                _world.Fields.Clear();
+                _world.Fields.Add(new ForceField
+                {
+                    Type = ForceField.Kind.Attract,
+                    Position = tr.TargetPosition + new Vector3(0, 1.5f, 0),
+                    Radius = tr.Radius,
+                    Strength = tr.Strength,
+                });
+                foreach (var b in _world.Bodies) b.Wake();
+                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> attractor");
+                break;
+            case TriggerActionKind.ToggleRepeller:
+                _world.Fields.Clear();
+                _world.Fields.Add(new ForceField
+                {
+                    Type = ForceField.Kind.Repel,
+                    Position = tr.TargetPosition + new Vector3(0, 1.5f, 0),
+                    Radius = tr.Radius,
+                    Strength = tr.Strength,
+                });
+                foreach (var b in _world.Bodies) b.Wake();
+                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> repeller");
+                break;
+        }
+        NotifyStateChanged();
+    }
+
+    private void ApplyExplosionAt(Vector3 center, float radius, float strength)
+    {
+        _world.ApplyExplosion(center, radius, strength);
+        SpawnExplosionFeedback(center, radius);
+        PlayExplosionSound();
+        foreach (var b in _world.Bodies) b.Wake();
     }
 
     // ---- effects ----
@@ -876,9 +2069,12 @@ internal sealed class GlPanel : Control
     /// </summary>
     private void SpawnEffectsFromWorld()
     {
-        // sparks from impacts (the solver flagged contacts with a high closing speed)
+        float loudestImpact = 0f;
+
+        // sparks + dust from impacts (the solver flagged contacts with a high closing speed)
         foreach (var (point, normal, speed) in _world.Impacts)
         {
+            loudestImpact = MathF.Max(loudestImpact, speed);
             if (_particles.Count >= MaxParticles) break;
             int count = Math.Clamp((int)(speed * 0.8f), 2, 10);
             for (int i = 0; i < count; i++)
@@ -897,7 +2093,27 @@ internal sealed class GlPanel : Control
                     Gravity = true,
                 });
             }
+
+            // gray dust puffs make heavy hits read better than sparks alone
+            int dust = Math.Clamp((int)(speed * 0.35f), 1, 5);
+            for (int i = 0; i < dust && _particles.Count < MaxParticles; i++)
+            {
+                var dir = Vector3.Normalize(normal * 0.7f + RandomUnit() * 0.9f);
+                _particles.Add(new Particle
+                {
+                    Pos = point + normal * 0.04f,
+                    Vel = dir * (0.5f + (float)_rng.NextDouble() * 1.8f),
+                    Color = new Vector3(0.55f, 0.54f, 0.50f),
+                    Life = 0.65f,
+                    MaxLife = 0.65f,
+                    Size = 0.10f,
+                    Gravity = false,
+                });
+            }
         }
+        if (loudestImpact >= 3.5f) PlayImpactSound(loudestImpact);
+
+        SpawnWaterSplashEffects();
 
         // trails behind fast bodies
         foreach (var b in _world.Bodies)
@@ -916,6 +2132,148 @@ internal sealed class GlPanel : Control
                 Gravity = false,
             });
         }
+    }
+
+    private void SpawnWaterSplashEffects()
+    {
+        if (_world.Waters.Count == 0)
+        {
+            _waterTouchState.Clear();
+            return;
+        }
+
+        var w = _world.Waters[0];
+        var alive = new HashSet<RigidBody>(_world.Bodies);
+        foreach (var key in _waterTouchState.Keys.ToArray())
+            if (!alive.Contains(key)) _waterTouchState.Remove(key);
+
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic) continue;
+            float surface = w.SurfaceAt(b.Position.X, b.Position.Z);
+            bool intersectsSurface = w.ContainsColumn(b.Position)
+                && b.Position.Y - b.BoundingRadius < surface
+                && b.Position.Y + b.BoundingRadius > surface;
+
+            bool wasTouching = _waterTouchState.TryGetValue(b, out var prev) && prev;
+            _waterTouchState[b] = intersectsSurface;
+
+            if (!intersectsSurface || wasTouching) continue;
+            if (b.Velocity.Y > -0.25f && b.Velocity.LengthSquared() < 4f) continue;
+
+            var pos = new Vector3(b.Position.X, surface + 0.03f, b.Position.Z);
+            SpawnSplash(pos, MathF.Min(2.8f, 0.45f + b.Velocity.Length() * 0.12f + b.BoundingRadius * 0.35f));
+            PlaySplashSound();
+        }
+    }
+
+    private void SpawnSplash(Vector3 pos, float power)
+    {
+        int count = Math.Clamp((int)(power * 12f), 6, 28);
+        for (int i = 0; i < count && _particles.Count < MaxParticles; i++)
+        {
+            var horizontal = new Vector3((float)_rng.NextDouble() * 2f - 1f, 0f, (float)_rng.NextDouble() * 2f - 1f);
+            if (horizontal.LengthSquared() < 1e-4f) horizontal = Vector3.UnitX;
+            horizontal = Vector3.Normalize(horizontal);
+            float speed = power * (0.8f + (float)_rng.NextDouble() * 1.8f);
+            _particles.Add(new Particle
+            {
+                Pos = pos,
+                Vel = horizontal * speed + Vector3.UnitY * (power * (0.8f + (float)_rng.NextDouble() * 1.5f)),
+                Color = new Vector3(0.45f, 0.75f, 1.0f),
+                Life = 0.55f + (float)_rng.NextDouble() * 0.35f,
+                MaxLife = 0.85f,
+                Size = 0.045f + power * 0.018f,
+                Gravity = true,
+            });
+        }
+
+        // Short-lived foam dots stay near the surface.
+        for (int i = 0; i < 10 && _particles.Count < MaxParticles; i++)
+        {
+            var offset = new Vector3((float)_rng.NextDouble() * 2f - 1f, 0f, (float)_rng.NextDouble() * 2f - 1f);
+            if (offset.LengthSquared() > 1e-4f) offset = Vector3.Normalize(offset) * ((float)_rng.NextDouble() * 0.55f * power);
+            _particles.Add(new Particle
+            {
+                Pos = pos + offset,
+                Vel = offset * 0.2f,
+                Color = new Vector3(0.80f, 0.92f, 1.0f),
+                Life = 0.75f,
+                MaxLife = 0.75f,
+                Size = 0.07f,
+                Gravity = false,
+            });
+        }
+    }
+
+    private void SpawnExplosionFeedback(Vector3 center, float radius)
+    {
+        // Fast radial particles plus a flat bright disk give a cheap shockwave impression.
+        for (int i = 0; i < 48 && _particles.Count < MaxParticles; i++)
+        {
+            var dir = RandomUnit();
+            dir.Y = MathF.Abs(dir.Y) * 0.45f + 0.15f;
+            dir = Vector3.Normalize(dir);
+            _particles.Add(new Particle
+            {
+                Pos = center + dir * 0.15f,
+                Vel = dir * (5f + (float)_rng.NextDouble() * 8f),
+                Color = new Vector3(1.0f, 0.55f + (float)_rng.NextDouble() * 0.25f, 0.12f),
+                Life = 0.55f,
+                MaxLife = 0.55f,
+                Size = 0.08f + (float)_rng.NextDouble() * 0.08f,
+                Gravity = false,
+            });
+        }
+
+        for (int i = 0; i < 28 && _particles.Count < MaxParticles; i++)
+        {
+            float a = MathF.Tau * i / 28f;
+            var dir = new Vector3(MathF.Cos(a), 0.05f, MathF.Sin(a));
+            _particles.Add(new Particle
+            {
+                Pos = center + new Vector3(0, 0.08f, 0),
+                Vel = dir * (radius * 1.7f),
+                Color = new Vector3(1.0f, 0.75f, 0.25f),
+                Life = 0.32f,
+                MaxLife = 0.32f,
+                Size = 0.09f,
+                Gravity = false,
+            });
+        }
+    }
+
+    private void PlayImpactSound(float speed)
+    {
+        if (!_soundEnabled) return;
+        double now = _sw.Elapsed.TotalSeconds;
+        if (now < _nextImpactSound) return;
+        _nextImpactSound = now + 0.09;
+        PlaySystemSound(speed > 8f ? SystemSounds.Hand : SystemSounds.Beep);
+    }
+
+    private void PlaySplashSound()
+    {
+        if (!_soundEnabled) return;
+        double now = _sw.Elapsed.TotalSeconds;
+        if (now < _nextSplashSound) return;
+        _nextSplashSound = now + 0.18;
+        PlaySystemSound(SystemSounds.Asterisk);
+    }
+
+    private void PlayExplosionSound()
+    {
+        if (!_soundEnabled) return;
+        double now = _sw.Elapsed.TotalSeconds;
+        if (now < _nextExplosionSound) return;
+        _nextExplosionSound = now + 0.25;
+        PlaySystemSound(SystemSounds.Exclamation);
+    }
+
+    private static void PlaySystemSound(SystemSound sound)
+    {
+        try { sound.Play(); }
+        catch { /* sound is non-critical feedback */ }
     }
 
     private void UpdateParticles(float dt)
@@ -1013,7 +2371,7 @@ internal sealed class GlPanel : Control
                 HalfX = ArenaHalf,
                 HalfZ = ArenaHalf,
                 SurfaceY = 1.6f,
-                Density = 1.0f,
+                Density = 1.65f,
                 LinearDrag = 2.5f,
             });
         foreach (var b in _world.Bodies) b.Wake();
@@ -1033,13 +2391,14 @@ internal sealed class GlPanel : Control
             return;
         }
 
-        if (!_aimValid && kind != ForceField.Kind.Wind) return;
+        if (!_aimValid) return;
 
         _world.Fields.Clear();
         if (kind == ForceField.Kind.Wind)
         {
-            var dir = Vector3.Normalize(new Vector3(_camTarget.X - _camPos.X, 0, _camTarget.Z - _camPos.Z));
-            _world.Fields.Add(new ForceField { Type = kind, Position = _camTarget, Radius = 40f, Strength = 9f, WindDir = dir });
+            var dir = new Vector3(_camTarget.X - _camPos.X, 0, _camTarget.Z - _camPos.Z);
+            dir = dir.LengthSquared() > 1e-5f ? Vector3.Normalize(dir) : Vector3.UnitX;
+            _world.Fields.Add(new ForceField { Type = kind, Position = _aimPoint + new Vector3(0, 1.6f, 0), Radius = 7.5f, Strength = 9f, WindDir = dir });
         }
         else
         {
@@ -1047,6 +2406,82 @@ internal sealed class GlPanel : Control
         }
         foreach (var b in _world.Bodies) b.Wake();
         NotifyStateChanged();
+    }
+
+    private void SelectBody(RigidBody? body)
+    {
+        if (body != null && !body.UserObject) body = null;
+        if (body != null && _selectedTrigger != null)
+        {
+            _selectedTrigger = null;
+            NotifyTriggerSelectionChanged();
+        }
+        if (_selectedBody == body) return;
+        _selectedBody = body;
+        NotifySelectionChanged();
+    }
+
+    private void SelectTrigger(SceneTrigger? trigger)
+    {
+        if (trigger != null && _selectedBody != null)
+        {
+            _selectedBody = null;
+            NotifySelectionChanged();
+        }
+        if (_selectedTrigger == trigger) return;
+        _selectedTrigger = trigger;
+        NotifyTriggerSelectionChanged();
+    }
+
+    private SelectedBodySnapshot? CreateSelectedSnapshot()
+    {
+        var b = _selectedBody;
+        if (b == null) return null;
+        return new SelectedBodySnapshot
+        {
+            IsStatic = b.IsStatic,
+            ChildCount = b.Children.Length,
+            Mass = b.Mass,
+            Density = b.Density,
+            Friction = b.Friction,
+            Restitution = b.Restitution,
+            Position = b.Position,
+            Velocity = b.Velocity,
+            Color = b.Color,
+            Breakable = b.Breakable,
+            BreakThreshold = b.BreakThreshold,
+        };
+    }
+
+    private SelectedTriggerSnapshot? CreateSelectedTriggerSnapshot()
+    {
+        var tr = _selectedTrigger;
+        if (tr == null) return null;
+        return new SelectedTriggerSnapshot
+        {
+            Name = tr.Name,
+            Position = tr.Position,
+            HalfExtents = tr.HalfExtents,
+            Action = tr.Action,
+            OneShot = tr.OneShot,
+            Enabled = tr.Enabled,
+            Radius = tr.Radius,
+            Strength = tr.Strength,
+            CooldownSeconds = tr.CooldownSeconds,
+            TargetPosition = tr.TargetPosition,
+        };
+    }
+
+    private void NotifySelectionChanged()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        SelectionChanged?.Invoke(CreateSelectedSnapshot());
+    }
+
+    private void NotifyTriggerSelectionChanged()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        TriggerSelectionChanged?.Invoke(CreateSelectedTriggerSnapshot());
     }
 
     private void NotifyStateChanged()
@@ -1087,11 +2522,94 @@ internal sealed class GlPanel : Control
         return (near3, Vector3.Normalize(far3 - near3));
     }
 
+    private void TryStartEditorToolDrag(int mx, int my)
+    {
+        var (origin, dir) = MouseRay(mx, my);
+        var body = _world.RayCast(origin, dir, out _, out _);
+        if (body != null && body.UserObject)
+            SelectBody(body);
+
+        if (_selectedBody == null || _selectedBody.IsStatic) return;
+
+        _selectedBody.Wake();
+        _toolDragging = true;
+        _toolDragStartX = mx;
+        _toolDragStartY = my;
+        _toolStartPos = _selectedBody.Position;
+        _toolStartRot = _selectedBody.Rotation;
+        _toolLastScaleFactor = 1f;
+    }
+
+    private void UpdateEditorToolDrag(int mx, int my)
+    {
+        if (_selectedBody == null) { _toolDragging = false; return; }
+        var b = _selectedBody;
+
+        switch (_editorTool)
+        {
+            case EditorToolMode.Move:
+                if (MouseToPlaneY(mx, my, _toolStartPos.Y, out var p))
+                {
+                    b.Position = new Vector3(p.X, _toolStartPos.Y, p.Z);
+                    b.Velocity = Vector3.Zero;
+                }
+                break;
+
+            case EditorToolMode.Rotate:
+                float angle = (mx - _toolDragStartX) * 0.015f;
+                b.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitY, angle) * _toolStartRot);
+                b.AngularVelocity = Vector3.Zero;
+                break;
+
+            case EditorToolMode.Scale:
+                float f = MathF.Exp((_toolDragStartY - my) * 0.01f);
+                f = Math.Clamp(f, 0.25f, 4.0f);
+                float delta = f / Math.Max(0.001f, _toolLastScaleFactor);
+                b.ScaleUniform(delta);
+                _toolLastScaleFactor = f;
+                break;
+        }
+
+        b.UpdateDerived();
+        b.Wake();
+        NotifySelectionChanged();
+    }
+
+    private bool MouseToPlaneY(int mx, int my, float y, out Vector3 point)
+    {
+        var (origin, dir) = MouseRay(mx, my);
+        point = default;
+        if (MathF.Abs(dir.Y) < 1e-5f) return false;
+        float t = (y - origin.Y) / dir.Y;
+        if (t <= 0f) return false;
+        point = origin + dir * t;
+        float lim = ArenaHalf - 0.3f;
+        point.X = Math.Clamp(point.X, -lim, lim);
+        point.Z = Math.Clamp(point.Z, -lim, lim);
+        return true;
+    }
+
     private void TryGrab(int mx, int my)
     {
         var (origin, dir) = MouseRay(mx, my);
         var body = _world.RayCast(origin, dir, out float t, out var hitPoint);
-        if (body == null || body.IsStatic) return;
+        var trigger = PickTrigger(origin, dir, out float triggerT);
+
+        if (trigger != null && (body == null || triggerT < t))
+        {
+            SelectTrigger(trigger);
+            return;
+        }
+
+        if (body == null || !body.UserObject)
+        {
+            SelectBody(null);
+            SelectTrigger(null);
+            return;
+        }
+
+        SelectBody(body);
+        if (body.IsStatic) return;
 
         body.Wake();
         _world.Grabbed = body;
@@ -1102,6 +2620,46 @@ internal sealed class GlPanel : Control
         // drag plane: perpendicular to the view direction, through the grab point
         var camFwd = Vector3.Normalize(_camTarget - _camPos);
         _dragPlaneDist = Vector3.Dot(hitPoint - _camPos, camFwd);
+    }
+
+    private SceneTrigger? PickTrigger(Vector3 origin, Vector3 dir, out float bestT)
+    {
+        bestT = float.PositiveInfinity;
+        SceneTrigger? best = null;
+        foreach (var tr in _triggers)
+        {
+            var min = tr.Position - tr.HalfExtents;
+            var max = tr.Position + tr.HalfExtents;
+            if (!RayAabb(origin, dir, min, max, out float t)) continue;
+            if (t < bestT) { bestT = t; best = tr; }
+        }
+        return best;
+    }
+
+    private static bool RayAabb(Vector3 origin, Vector3 dir, Vector3 min, Vector3 max, out float tHit)
+    {
+        float tMin = 0f, tMax = float.PositiveInfinity;
+        for (int axis = 0; axis < 3; axis++)
+        {
+            float o = axis == 0 ? origin.X : axis == 1 ? origin.Y : origin.Z;
+            float d = axis == 0 ? dir.X : axis == 1 ? dir.Y : dir.Z;
+            float mn = axis == 0 ? min.X : axis == 1 ? min.Y : min.Z;
+            float mx = axis == 0 ? max.X : axis == 1 ? max.Y : max.Z;
+            if (MathF.Abs(d) < 1e-6f)
+            {
+                if (o < mn || o > mx) { tHit = 0f; return false; }
+                continue;
+            }
+            float inv = 1f / d;
+            float t1 = (mn - o) * inv;
+            float t2 = (mx - o) * inv;
+            if (t1 > t2) (t1, t2) = (t2, t1);
+            tMin = MathF.Max(tMin, t1);
+            tMax = MathF.Min(tMax, t2);
+            if (tMin > tMax) { tHit = 0f; return false; }
+        }
+        tHit = tMin;
+        return true;
     }
 
     private Vector3 ComputeDragTarget()
@@ -1176,6 +2734,8 @@ internal sealed class GlPanel : Control
         GL.Uniform1(_uAlbedo, 1);
         GL.Uniform1(_uAlpha, 1f);
         GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform1(_uTime, (float)_sw.Elapsed.TotalSeconds);
+        GL.Uniform1(_uWaterWaveAmp, 0f);
 
         // floor
         GL.BindTexture(GL.TEXTURE_2D, _texFloor);
@@ -1183,15 +2743,31 @@ internal sealed class GlPanel : Control
         GL.Uniform3(_uColor, 0.62f, 0.64f, 0.68f);
         GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(40f, 1f, 40f)));
         _planeMesh.Draw();
+        GL.Uniform1(_uWaterWaveAmp, 0f);
 
         // bodies
         GL.Uniform1(_uUvScale, 1f);
         foreach (var b in _world.Bodies)
         {
             // sleeping bodies dim slightly so you can see the engine actually sleeps
-            var color = b == _world.Grabbed ? b.Color * 1.35f
+            var color = b == _selectedBody ? b.Color * 1.55f + new Vector3(0.25f, 0.22f, 0.08f)
+                      : b == _world.Grabbed ? b.Color * 1.35f
+                      : b == _jointFirstBody ? b.Color * 1.45f + new Vector3(0.25f, 0.35f, 0.9f)
                       : b.Sleeping ? b.Color * 0.72f
                       : b.Color;
+
+            bool fieldAffected = TryGetAffectingFieldColor(b, out var fieldColor);
+            if (fieldAffected)
+            {
+                // Affected bodies get a visible tint and a faint glow, so the user sees what the field is touching.
+                color = color * 0.65f + fieldColor * 0.65f;
+                GL.Uniform1(_uEmissive, 0.35f);
+            }
+            else
+            {
+                GL.Uniform1(_uEmissive, 0f);
+            }
+
             GL.Uniform3(_uColor, color.X, color.Y, color.Z);
 
             foreach (ref var child in b.Children.AsSpan())
@@ -1203,57 +2779,310 @@ internal sealed class GlPanel : Control
                 if (b.IsStatic) GL.Uniform1(_uUvScale, 1f);
             }
         }
+        GL.Uniform1(_uEmissive, 0f);
 
         DrawJointRods();
         DrawFieldMarkers();
+        DrawEditorGizmo();
         DrawAimMarker();
         DrawParticles();
+        DrawTriggers();
+        DrawChallengeMarker();
         DrawWater();
     }
 
-    /// <summary>Thin rods drawn between joint anchors so chains and ropes read as connected.</summary>
+    /// <summary>Visual rods and springs drawn between joint anchors.</summary>
     private void DrawJointRods()
     {
-        if (_world.Joints.Count == 0) return;
+        if (_world.Joints.Count == 0 && _jointFirstBody == null) return;
         GL.BindTexture(GL.TEXTURE_2D, _texMetal);
         GL.Uniform1(_uUvScale, 1f);
-        GL.Uniform3(_uColor, 0.7f, 0.7f, 0.74f);
+        GL.Uniform1(_uEmissive, 0.35f);
 
         foreach (var j in _world.Joints)
         {
-            var a = j.WorldA;
-            var b = j.WorldB;
-            var mid = (a + b) * 0.5f;
-            var d = b - a;
-            float len = d.Length();
-            if (len < 1e-4f) continue;
+            if (j.Type == Joint.Kind.Spring)
+            {
+                GL.Uniform3(_uColor, 0.40f, 0.85f, 1.00f);
+                DrawSpringLine(j.WorldA, j.WorldB);
+            }
+            else
+            {
+                GL.Uniform3(_uColor, 0.78f, 0.78f, 0.84f);
+                DrawRodSegment(j.WorldA, j.WorldB, 0.035f);
+            }
+        }
 
-            // orient a unit cube's Y axis along the rod, then squash it thin
-            var dir = d / len;
-            var rot = RotationFromTo(Vector3.UnitY, dir);
-            var m = Matrix4x4.CreateScale(0.03f, len * 0.5f, 0.03f)
-                  * Matrix4x4.CreateFromQuaternion(rot)
-                  * Matrix4x4.CreateTranslation(mid);
-            GL.UniformMatrix4(_uModel, ToArray(m));
-            _cubeMesh.Draw();
+        // While the user is choosing the second object, draw a temporary line from the first pick to the aim point.
+        if (_jointFirstBody != null && (_pendingSceneAction == PendingSceneActionKind.Connect || _pendingSceneAction == PendingSceneActionKind.Spring) && _aimValid)
+        {
+            if (_pendingSceneAction == PendingSceneActionKind.Spring)
+            {
+                GL.Uniform3(_uColor, 0.45f, 0.95f, 1.00f);
+                DrawSpringLine(_jointFirstWorld, _aimPoint + new Vector3(0, 0.35f, 0));
+            }
+            else
+            {
+                GL.Uniform3(_uColor, 1.0f, 0.9f, 0.25f);
+                DrawRodSegment(_jointFirstWorld, _aimPoint + new Vector3(0, 0.35f, 0), 0.045f);
+            }
+        }
+
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawRodSegment(Vector3 a, Vector3 b, float thickness)
+    {
+        var mid = (a + b) * 0.5f;
+        var d = b - a;
+        float len = d.Length();
+        if (len < 1e-4f) return;
+        var dir = d / len;
+        var rot = RotationFromTo(Vector3.UnitY, dir);
+        var m = Matrix4x4.CreateScale(thickness, len * 0.5f, thickness)
+              * Matrix4x4.CreateFromQuaternion(rot)
+              * Matrix4x4.CreateTranslation(mid);
+        GL.UniformMatrix4(_uModel, ToArray(m));
+        _cubeMesh.Draw();
+    }
+
+    private void DrawSpringLine(Vector3 a, Vector3 b)
+    {
+        var d = b - a;
+        float len = d.Length();
+        if (len < 1e-4f) return;
+        var dir = d / len;
+        var side = Vector3.Cross(dir, Vector3.UnitY);
+        if (side.LengthSquared() < 1e-5f) side = Vector3.Cross(dir, Vector3.UnitX);
+        side = Vector3.Normalize(side);
+
+        const int coils = 10;
+        Vector3 prev = a;
+        for (int i = 1; i <= coils; i++)
+        {
+            float t = i / (float)coils;
+            float amp = (i == coils ? 0f : 0.16f * (i % 2 == 0 ? 1f : -1f));
+            var next = Vector3.Lerp(a, b, t) + side * amp;
+            DrawRodSegment(prev, next, 0.028f);
+            prev = next;
         }
     }
 
     private void DrawFieldMarkers()
     {
+        if (_world.Fields.Count == 0) return;
+
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+
+        // Draw the solid “source” markers first so each field still has a clear anchor point.
         foreach (var f in _world.Fields)
         {
-            if (f.Type == ForceField.Kind.Wind) continue; // wind has no single point
-            var c = f.Type == ForceField.Kind.Attract ? new Vector3(0.3f, 0.6f, 1.0f)
-                                                       : new Vector3(1.0f, 0.4f, 0.3f);
-            GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+            var c = FieldColor(f.Type);
             GL.Uniform1(_uEmissive, 1f);
+            GL.Uniform1(_uAlpha, 1f);
+            GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+            float coreSize = f.Type == ForceField.Kind.Wind ? 0.18f : 0.25f;
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(coreSize) * Matrix4x4.CreateTranslation(f.Position)));
+            _sphereMesh.Draw();
+        }
+        GL.Uniform1(_uEmissive, 0f);
+
+        // Then overlay translucent animated volumes / particles so the field “reads” in space.
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+
+        foreach (var f in _world.Fields)
+        {
+            switch (f.Type)
+            {
+                case ForceField.Kind.Attract:
+                case ForceField.Kind.Repel:
+                    DrawRadialFieldEffect(f, t);
+                    break;
+                case ForceField.Kind.Wind:
+                    DrawWindFieldEffect(f, t);
+                    break;
+            }
+        }
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private Vector3 FieldColor(ForceField.Kind kind) => kind switch
+    {
+        ForceField.Kind.Attract => new Vector3(0.30f, 0.60f, 1.00f),
+        ForceField.Kind.Repel => new Vector3(1.00f, 0.40f, 0.30f),
+        ForceField.Kind.Wind => new Vector3(0.55f, 0.95f, 0.95f),
+        _ => new Vector3(1f),
+    };
+
+
+    private bool TryGetAffectingFieldColor(RigidBody body, out Vector3 color)
+    {
+        color = default;
+        if (body.IsStatic || _world.Fields.Count == 0) return false;
+
+        foreach (var field in _world.Fields)
+        {
+            float dist = Vector3.Distance(body.Position, field.Position);
+            if (dist > field.Radius) continue;
+            color = FieldColor(field.Type);
+            return true;
+        }
+        return false;
+    }
+
+    private void DrawRadialFieldEffect(ForceField f, float t)
+    {
+        var c = FieldColor(f.Type);
+        bool inward = f.Type == ForceField.Kind.Attract;
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uEmissive, 1f);
+
+        // A couple of faint pulsing shells show the field radius.
+        for (int layer = 0; layer < 2; layer++)
+        {
+            float pulse = 0.5f + 0.5f * MathF.Sin(t * (1.8f + layer * 0.35f) + layer * 1.7f);
+            float radius = f.Radius * (0.82f + layer * 0.12f + pulse * 0.05f);
+            float alpha = 0.06f + pulse * 0.045f;
+            GL.Uniform1(_uAlpha, alpha);
             GL.Uniform3(_uColor, c.X, c.Y, c.Z);
             GL.UniformMatrix4(_uModel, ToArray(
-                Matrix4x4.CreateScale(0.25f) * Matrix4x4.CreateTranslation(f.Position)));
+                Matrix4x4.CreateScale(radius) * Matrix4x4.CreateTranslation(f.Position)));
             _sphereMesh.Draw();
-            GL.Uniform1(_uEmissive, 0f);
         }
+
+        // Moving particles make the direction obvious: inward spiral for attract, outward for repel.
+        const int count = 18;
+        for (int i = 0; i < count; i++)
+        {
+            float seed = i / (float)count;
+            float anim = (t * 0.55f + seed) % 1f;
+            float flow = inward ? (1f - anim) : anim;
+            float radius = MathF.Max(0.25f, f.Radius * (0.12f + 0.83f * flow));
+            float angle = seed * MathF.Tau + t * (inward ? 2.2f : -2.2f) + (1f - flow) * 5.5f;
+            float lift = MathF.Sin(angle * 2.3f + t * 2.4f) * 0.22f * (0.35f + flow);
+            var pos = f.Position + new Vector3(MathF.Cos(angle) * radius, lift, MathF.Sin(angle) * radius);
+
+            float size = inward ? (0.04f + 0.09f * (1f - flow))
+                                : (0.04f + 0.09f * flow);
+            float alpha = inward ? (0.14f + 0.28f * (1f - flow))
+                                 : (0.14f + 0.28f * flow);
+            GL.Uniform1(_uAlpha, alpha);
+            GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(size) * Matrix4x4.CreateTranslation(pos)));
+            _sphereMesh.Draw();
+        }
+    }
+
+    private void DrawWindFieldEffect(ForceField f, float t)
+    {
+        var c = FieldColor(f.Type);
+        GetWindFrame(f, out var dir, out var side, out var up, out var rot);
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uEmissive, 1f);
+
+        // A clearer elongated bubble with a couple of nested shells so the volume reads better.
+        for (int layer = 0; layer < 2; layer++)
+        {
+            float shellPulse = 0.5f + 0.5f * MathF.Sin(t * (2.0f + layer * 0.45f) + layer * 0.9f);
+            GL.Uniform1(_uAlpha, 0.07f + shellPulse * 0.035f);
+            GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(1.15f + layer * 0.2f, f.Radius * (0.88f + layer * 0.08f), 1.15f + layer * 0.2f)
+                * Matrix4x4.CreateFromQuaternion(rot)
+                * Matrix4x4.CreateTranslation(f.Position)));
+            _capsuleMesh.Draw();
+        }
+
+        // More streaks inside the flow so it looks less subtle than before.
+        const int lanes = 5;
+        const int perLane = 6;
+        for (int lane = 0; lane < lanes; lane++)
+        {
+            float laneOffset = lane - (lanes - 1) * 0.5f;
+            for (int i = 0; i < perLane; i++)
+            {
+                float seed = i / (float)perLane + lane * 0.13f;
+                float flow = (t * 1.1f + seed) % 1f;
+                float along = (flow - 0.5f) * f.Radius * 1.85f;
+                float sideOffset = laneOffset * 0.42f;
+                float upOffset = MathF.Sin(t * 2.7f + lane * 1.1f + i * 0.6f) * 0.2f;
+                var pos = f.Position + dir * along + side * sideOffset + up * upOffset;
+
+                float len = 0.28f + 0.16f * flow;
+                float thick = 0.045f + 0.01f * MathF.Abs(laneOffset);
+                GL.Uniform1(_uAlpha, 0.16f + 0.22f * flow);
+                GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+                GL.UniformMatrix4(_uModel, ToArray(
+                    Matrix4x4.CreateScale(thick, len, thick)
+                    * Matrix4x4.CreateFromQuaternion(rot)
+                    * Matrix4x4.CreateTranslation(pos)));
+                _capsuleMesh.Draw();
+            }
+        }
+
+        // Arrow-like chevrons make the direction unmistakable.
+        const int arrowCount = 4;
+        for (int i = 0; i < arrowCount; i++)
+        {
+            float flow = ((t * 0.8f) + i / (float)arrowCount) % 1f;
+            float along = (flow - 0.5f) * f.Radius * 1.75f;
+            var basePos = f.Position + dir * along;
+            float alpha = 0.18f + 0.22f * flow;
+            for (int wing = -1; wing <= 1; wing += 2)
+            {
+                var wingDir = Vector3.Normalize(dir * 0.9f + side * 0.35f * wing);
+                var wingRot = RotationFromTo(Vector3.UnitY, wingDir);
+                var wingPos = basePos - dir * 0.12f + side * (0.12f * wing);
+                GL.Uniform1(_uAlpha, alpha);
+                GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+                GL.UniformMatrix4(_uModel, ToArray(
+                    Matrix4x4.CreateScale(0.04f, 0.22f, 0.04f)
+                    * Matrix4x4.CreateFromQuaternion(wingRot)
+                    * Matrix4x4.CreateTranslation(wingPos)));
+                _capsuleMesh.Draw();
+            }
+        }
+
+        // Small “dust” dots riding through the stream sell the idea of moving air.
+        const int dustCount = 14;
+        for (int i = 0; i < dustCount; i++)
+        {
+            float seed = i / (float)dustCount;
+            float flow = (t * 1.25f + seed) % 1f;
+            float along = (flow - 0.5f) * f.Radius * 1.9f;
+            float spiral = seed * MathF.Tau * 2f + t * 1.6f;
+            var pos = f.Position
+                + dir * along
+                + side * MathF.Cos(spiral) * 0.55f
+                + up * MathF.Sin(spiral) * 0.28f;
+            GL.Uniform1(_uAlpha, 0.10f + 0.18f * flow);
+            GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(0.05f) * Matrix4x4.CreateTranslation(pos)));
+            _sphereMesh.Draw();
+        }
+    }
+
+    private void GetWindFrame(ForceField f, out Vector3 dir, out Vector3 side, out Vector3 up, out Quaternion rot)
+    {
+        dir = f.WindDir.LengthSquared() > 1e-6f ? Vector3.Normalize(f.WindDir) : Vector3.UnitX;
+        side = Vector3.Cross(dir, Vector3.UnitY);
+        if (side.LengthSquared() < 1e-6f) side = Vector3.Cross(dir, Vector3.UnitX);
+        side = Vector3.Normalize(side);
+        up = Vector3.Normalize(Vector3.Cross(side, dir));
+        rot = RotationFromTo(Vector3.UnitY, dir);
     }
 
     private void DrawParticles()
@@ -1274,6 +3103,143 @@ internal sealed class GlPanel : Control
         GL.Uniform1(_uEmissive, 0f);
     }
 
+    private void DrawEditorGizmo()
+    {
+        if (_selectedBody == null) return;
+        var p = _selectedBody.Position;
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 1f);
+        GL.Uniform1(_uAlpha, 1f);
+
+        // X axis handle
+        DrawGizmoRod(p, p + Vector3.UnitX * 1.25f, new Vector3(1.0f, 0.25f, 0.20f), 0.035f);
+        // Y axis handle
+        DrawGizmoRod(p, p + Vector3.UnitY * 1.25f, new Vector3(0.25f, 1.0f, 0.25f), 0.035f);
+        // Z axis handle
+        DrawGizmoRod(p, p + Vector3.UnitZ * 1.25f, new Vector3(0.25f, 0.45f, 1.0f), 0.035f);
+
+        // Tool-specific hint marker. Move = small floor disc, rotate = halo, scale = cube corner.
+        var c = _editorTool switch
+        {
+            EditorToolMode.Move => new Vector3(1.0f, 0.85f, 0.20f),
+            EditorToolMode.Rotate => new Vector3(0.90f, 0.45f, 1.0f),
+            EditorToolMode.Scale => new Vector3(0.35f, 1.0f, 0.85f),
+            _ => new Vector3(1.0f, 1.0f, 0.45f),
+        };
+        GL.Uniform3(_uColor, c.X, c.Y, c.Z);
+        float s = _editorTool == EditorToolMode.Scale ? 0.18f : 0.09f;
+        GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(s) * Matrix4x4.CreateTranslation(p + new Vector3(0, 1.45f, 0))));
+        (_editorTool == EditorToolMode.Scale ? _cubeMesh : _sphereMesh).Draw();
+
+        GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform1(_uAlpha, 1f);
+    }
+
+    private void DrawGizmoRod(Vector3 a, Vector3 b, Vector3 color, float thickness)
+    {
+        var d = b - a;
+        float len = d.Length();
+        if (len < 1e-5f) return;
+        var dir = d / len;
+        var rot = RotationFromTo(Vector3.UnitY, dir);
+        var mid = (a + b) * 0.5f;
+        GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+        GL.UniformMatrix4(_uModel, ToArray(
+            Matrix4x4.CreateScale(thickness, len * 0.5f, thickness)
+            * Matrix4x4.CreateFromQuaternion(rot)
+            * Matrix4x4.CreateTranslation(mid)));
+        _capsuleMesh.Draw();
+    }
+
+    private void DrawTriggers()
+    {
+        if (_triggers.Count == 0) return;
+
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0.75f);
+
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        foreach (var tr in _triggers)
+        {
+            var color = TriggerColor(tr.Action);
+            float press = tr.WasPressed ? 1f : 0f;
+            float pulse = tr.Pulse;
+            bool selected = tr == _selectedTrigger;
+            float alpha = tr.Enabled ? 0.38f + press * 0.28f + pulse * 0.22f : 0.16f;
+            if (selected) alpha += 0.28f;
+            var drawColor = selected ? color * 1.35f + new Vector3(0.25f, 0.22f, 0.05f) : color;
+            GL.Uniform1(_uAlpha, Math.Clamp(alpha, 0.10f, 0.95f));
+            GL.Uniform3(_uColor, drawColor.X, drawColor.Y, drawColor.Z);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(tr.HalfExtents.X, tr.HalfExtents.Y, tr.HalfExtents.Z)
+                * Matrix4x4.CreateTranslation(tr.Position)));
+            _cubeMesh.Draw();
+
+            // Thin pulsing halo around the plate.
+            float halo = 1.05f + 0.08f * MathF.Sin(t * 4f + tr.Position.X);
+            GL.Uniform1(_uAlpha, selected ? 0.55f : (tr.Enabled ? 0.18f + pulse * 0.25f : 0.07f));
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(tr.HalfExtents.X * halo, 0.025f, tr.HalfExtents.Z * halo)
+                * Matrix4x4.CreateTranslation(tr.Position + new Vector3(0, 0.075f, 0))));
+            _cubeMesh.Draw();
+        }
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private static Vector3 TriggerColor(TriggerActionKind action) => action switch
+    {
+        TriggerActionKind.Explosion => new Vector3(1.0f, 0.45f, 0.10f),
+        TriggerActionKind.Wind => new Vector3(0.55f, 0.95f, 0.95f),
+        TriggerActionKind.ToggleGravity => new Vector3(0.70f, 0.55f, 1.00f),
+        TriggerActionKind.ToggleAttractor => new Vector3(0.30f, 0.60f, 1.00f),
+        TriggerActionKind.ToggleRepeller => new Vector3(1.00f, 0.40f, 0.30f),
+        _ => new Vector3(0.8f),
+    };
+
+    private void DrawChallengeMarker()
+    {
+        if (_challengeKind == ChallengeKind.None || _challengeTargetRadius <= 0f) return;
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        var color = _challengeSuccess ? new Vector3(0.25f, 1.0f, 0.35f)
+                  : _challengeFailed ? new Vector3(1.0f, 0.25f, 0.2f)
+                  : new Vector3(1.0f, 0.85f, 0.12f);
+        float pulse = 0.5f + 0.5f * MathF.Sin(t * 3.0f);
+
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 1f);
+        GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+
+        GL.Uniform1(_uAlpha, 0.16f + pulse * 0.08f);
+        GL.UniformMatrix4(_uModel, ToArray(
+            Matrix4x4.CreateScale(_challengeTargetRadius * (0.95f + pulse * 0.05f)) * Matrix4x4.CreateTranslation(_challengeTarget)));
+        _sphereMesh.Draw();
+
+        GL.Uniform1(_uAlpha, 0.45f);
+        GL.UniformMatrix4(_uModel, ToArray(
+            Matrix4x4.CreateScale(_challengeTargetRadius, 0.035f, _challengeTargetRadius)
+            * Matrix4x4.CreateTranslation(new Vector3(_challengeTarget.X, 0.055f, _challengeTarget.Z))));
+        _sphereMesh.Draw();
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
     /// <summary>A single translucent quad at the water surface. Drawn last, blended, no depth write.</summary>
     private void DrawWater()
     {
@@ -1291,8 +3257,14 @@ internal sealed class GlPanel : Control
         GL.Uniform3(_uColor, 0.25f, 0.5f, 0.75f);
         var m = Matrix4x4.CreateScale(w.HalfX, 1f, w.HalfZ)
               * Matrix4x4.CreateTranslation(w.Center.X, w.SurfaceY, w.Center.Z);
+        GL.Uniform1(_uTime, w.Time);
+        GL.Uniform1(_uWaterWaveAmp, w.WaveAmplitude);
+        int rc = w.FillRipples(_rippleBuffer, WaterVolume.MaxRipples);
+        GL.Uniform1(_uRippleCount, rc);
+        if (rc > 0) GL.Uniform4(_uRipples, rc, _rippleBuffer);
         GL.UniformMatrix4(_uModel, ToArray(m));
-        _planeMesh.Draw();
+        _waterMesh.Draw();
+        GL.Uniform1(_uWaterWaveAmp, 0f);
 
         GL.DepthMask(1);
         GL.Disable(GL.BLEND);
@@ -1332,6 +3304,8 @@ internal sealed class GlPanel : Control
 
         GL.BindTexture(GL.TEXTURE_2D, _texMetal);
         GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform1(_uAlpha, 1f);
         GL.Uniform3(_uColor, 1.0f, 0.85f, 0.2f); // bright amber, hard to miss
 
         // a thin flattened sphere = a little disc sitting just above the floor
@@ -1339,6 +3313,197 @@ internal sealed class GlPanel : Control
               * Matrix4x4.CreateTranslation(_aimPoint + new Vector3(0, 0.02f, 0));
         GL.UniformMatrix4(_uModel, ToArray(m));
         _sphereMesh.Draw();
+
+        if (_pendingSceneAction == PendingSceneActionKind.Attractor || _pendingSceneAction == PendingSceneActionKind.Repeller)
+            DrawPendingFieldPreview();
+        else if (_pendingSceneAction == PendingSceneActionKind.Wind)
+            DrawPendingWindPreview();
+        else if (_pendingSceneAction == PendingSceneActionKind.Explosion)
+            DrawPendingExplosionPreview();
+    }
+
+    private void DrawPendingFieldPreview()
+    {
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        var kind = _pendingSceneAction == PendingSceneActionKind.Attractor ? ForceField.Kind.Attract : ForceField.Kind.Repel;
+        var color = FieldColor(kind);
+        var center = _aimPoint + new Vector3(0, 1.5f, 0);
+        const float radius = 7f;
+        bool inward = kind == ForceField.Kind.Attract;
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+        GL.Uniform1(_uEmissive, 1f);
+
+        // Main preview shell: users can immediately read both placement and final radius.
+        for (int i = 0; i < 2; i++)
+        {
+            float pulse = 0.5f + 0.5f * MathF.Sin(t * (2.1f + i * 0.4f) + i * 1.3f);
+            float shellRadius = radius * (0.94f + i * 0.05f + pulse * 0.025f);
+            GL.Uniform1(_uAlpha, 0.07f + pulse * 0.05f);
+            GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(shellRadius) * Matrix4x4.CreateTranslation(center)));
+            _sphereMesh.Draw();
+        }
+
+        // A slightly brighter core to show the exact origin point of the field.
+        GL.Uniform1(_uAlpha, 0.85f);
+        GL.UniformMatrix4(_uModel, ToArray(
+            Matrix4x4.CreateScale(0.22f) * Matrix4x4.CreateTranslation(center)));
+        _sphereMesh.Draw();
+
+        // Direction cue particles, so attract/repel differ before placement too.
+        const int orbitDots = 12;
+        for (int i = 0; i < orbitDots; i++)
+        {
+            float seed = i / (float)orbitDots;
+            float flow = (t * 0.6f + seed) % 1f;
+            if (inward) flow = 1f - flow;
+            float r = radius * (0.18f + 0.72f * flow);
+            float a = seed * MathF.Tau + t * (inward ? 2.0f : -2.0f);
+            var pos = center + new Vector3(MathF.Cos(a) * r, MathF.Sin(t * 3f + i) * 0.12f, MathF.Sin(a) * r);
+            float size = 0.05f + 0.04f * (inward ? (1f - flow) : flow);
+            GL.Uniform1(_uAlpha, 0.14f + 0.22f * (inward ? (1f - flow) : flow));
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(size) * Matrix4x4.CreateTranslation(pos)));
+            _sphereMesh.Draw();
+        }
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawPendingWindPreview()
+    {
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        var center = _aimPoint + new Vector3(0, 1.6f, 0);
+        const float radius = 7.5f;
+        var previewDir = new Vector3(_camTarget.X - _camPos.X, 0, _camTarget.Z - _camPos.Z);
+        previewDir = previewDir.LengthSquared() > 1e-6f ? Vector3.Normalize(previewDir) : Vector3.UnitX;
+        var fakeField = new ForceField { Type = ForceField.Kind.Wind, Position = center, Radius = radius, WindDir = previewDir };
+        var color = FieldColor(ForceField.Kind.Wind);
+        GetWindFrame(fakeField, out var dir, out var side, out var up, out var rot);
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+        GL.Uniform1(_uEmissive, 1f);
+        GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+
+        // Volume preview.
+        for (int layer = 0; layer < 2; layer++)
+        {
+            float pulse = 0.5f + 0.5f * MathF.Sin(t * (2.2f + layer * 0.4f) + layer * 0.8f);
+            GL.Uniform1(_uAlpha, 0.08f + pulse * 0.04f);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(1.2f + layer * 0.18f, radius * (0.90f + layer * 0.08f), 1.2f + layer * 0.18f)
+                * Matrix4x4.CreateFromQuaternion(rot)
+                * Matrix4x4.CreateTranslation(center)));
+            _capsuleMesh.Draw();
+        }
+
+        // Strong direction cue arrow line.
+        const int arrows = 5;
+        for (int i = 0; i < arrows; i++)
+        {
+            float flow = ((t * 0.85f) + i / (float)arrows) % 1f;
+            float along = (flow - 0.5f) * radius * 1.7f;
+            var basePos = center + dir * along;
+            GL.Uniform1(_uAlpha, 0.18f + 0.18f * flow);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(0.06f, 0.30f, 0.06f)
+                * Matrix4x4.CreateFromQuaternion(rot)
+                * Matrix4x4.CreateTranslation(basePos)));
+            _capsuleMesh.Draw();
+
+            for (int wing = -1; wing <= 1; wing += 2)
+            {
+                var wingDir = Vector3.Normalize(dir * 0.85f + side * 0.45f * wing);
+                var wingRot = RotationFromTo(Vector3.UnitY, wingDir);
+                var wingPos = basePos - dir * 0.14f + side * (0.14f * wing);
+                GL.Uniform1(_uAlpha, 0.22f + 0.15f * flow);
+                GL.UniformMatrix4(_uModel, ToArray(
+                    Matrix4x4.CreateScale(0.05f, 0.20f, 0.05f)
+                    * Matrix4x4.CreateFromQuaternion(wingRot)
+                    * Matrix4x4.CreateTranslation(wingPos)));
+                _capsuleMesh.Draw();
+            }
+        }
+
+        // Dust / stream particles.
+        const int dots = 18;
+        for (int i = 0; i < dots; i++)
+        {
+            float seed = i / (float)dots;
+            float flow = (t * 1.15f + seed) % 1f;
+            float along = (flow - 0.5f) * radius * 1.8f;
+            float spiral = seed * MathF.Tau * 2f + t * 1.8f;
+            var pos = center + dir * along + side * MathF.Cos(spiral) * 0.5f + up * MathF.Sin(spiral) * 0.22f;
+            GL.Uniform1(_uAlpha, 0.12f + 0.18f * flow);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(0.05f) * Matrix4x4.CreateTranslation(pos)));
+            _sphereMesh.Draw();
+        }
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawPendingExplosionPreview()
+    {
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        var center = _aimPoint + new Vector3(0, 0.35f, 0);
+        const float radius = 5f;
+        var color = new Vector3(1.0f, 0.55f, 0.12f);
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+        GL.Uniform1(_uEmissive, 1f);
+        GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+
+        // A translucent sphere shows the blast volume before the user commits the click.
+        float pulse = 0.5f + 0.5f * MathF.Sin(t * 3.2f);
+        GL.Uniform1(_uAlpha, 0.10f + pulse * 0.05f);
+        GL.UniformMatrix4(_uModel, ToArray(
+            Matrix4x4.CreateScale(radius * (0.97f + pulse * 0.035f)) * Matrix4x4.CreateTranslation(center)));
+        _sphereMesh.Draw();
+
+        // A flat, brighter ground ring makes the affected footprint obvious from the camera view.
+        GL.Uniform1(_uAlpha, 0.38f);
+        GL.UniformMatrix4(_uModel, ToArray(
+            Matrix4x4.CreateScale(radius, 0.035f, radius) * Matrix4x4.CreateTranslation(_aimPoint + new Vector3(0, 0.05f, 0))));
+        _sphereMesh.Draw();
+
+        // Outward preview dots communicate that this is an impulse, not a persistent field.
+        const int dots = 16;
+        for (int i = 0; i < dots; i++)
+        {
+            float seed = i / (float)dots;
+            float flow = (t * 0.95f + seed) % 1f;
+            float a = seed * MathF.Tau;
+            float r = radius * (0.14f + flow * 0.78f);
+            var pos = center + new Vector3(MathF.Cos(a) * r, 0.1f + flow * 0.35f, MathF.Sin(a) * r);
+            float size = 0.06f + flow * 0.05f;
+            GL.Uniform1(_uAlpha, 0.20f + flow * 0.35f);
+            GL.UniformMatrix4(_uModel, ToArray(
+                Matrix4x4.CreateScale(size) * Matrix4x4.CreateTranslation(pos)));
+            _sphereMesh.Draw();
+        }
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
     }
 
     private Mesh MeshFor(ShapeType shape) => shape switch

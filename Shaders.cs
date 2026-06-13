@@ -16,6 +16,10 @@ internal static class Shaders
         uniform mat4 uProj;
         uniform mat4 uLightVP;
         uniform float uUvScale;
+        uniform float uTime;
+        uniform float uWaterWaveAmp;
+        uniform int  uRippleCount;
+        uniform vec4 uRipples[24];   // xy = center, z = age (s), w = strength
 
         out vec3 vWorldPos;
         out vec3 vNormal;
@@ -25,8 +29,44 @@ internal static class Shaders
         void main()
         {
             vec4 world = uModel * vec4(aPos, 1.0);
+
+            if (uWaterWaveAmp > 0.0)
+            {
+                float x = world.x;
+                float z = world.z;
+                float t = uTime;
+                float w1 = sin(x * 1.15 + t * 1.35) * 0.55;
+                float w2 = sin(z * 1.75 + t * 1.85) * 0.30;
+                float w3 = sin((x + z) * 0.80 + t * 1.10) * 0.25;
+                world.y += uWaterWaveAmp * (w1 + w2 + w3);
+
+                // object-driven ripples: expanding rings, same formula as WaterVolume on the CPU
+                for (int i = 0; i < uRippleCount; i++)
+                {
+                    vec2 c = uRipples[i].xy;
+                    float age = uRipples[i].z;
+                    float strength = uRipples[i].w;
+                    float dist = length(vec2(x, z) - c);
+                    float fade = max(0.0, 1.0 - age / 1.6);
+                    float ring = age * 3.2;
+                    float band = exp(-2.5 * abs(dist - ring));
+                    world.y += strength * fade * band * sin(dist * 6.0 - age * 9.0);
+                }
+            }
+
             vWorldPos = world.xyz;
             vNormal = mat3(transpose(inverse(uModel))) * aNormal;
+            if (uWaterWaveAmp > 0.0)
+            {
+                float x = world.x;
+                float z = world.z;
+                float t = uTime;
+                float dx = uWaterWaveAmp * (1.15 * 0.55 * cos(x * 1.15 + t * 1.35)
+                         + 0.80 * 0.25 * cos((x + z) * 0.80 + t * 1.10));
+                float dz = uWaterWaveAmp * (1.75 * 0.30 * cos(z * 1.75 + t * 1.85)
+                         + 0.80 * 0.25 * cos((x + z) * 0.80 + t * 1.10));
+                vNormal = normalize(vec3(-dx, 1.0, -dz));
+            }
             vUV = aUV * uUvScale;
             vLightSpacePos = uLightVP * world;
             gl_Position = uProj * uView * world;

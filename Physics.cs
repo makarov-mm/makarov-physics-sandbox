@@ -239,9 +239,22 @@ internal sealed class RigidBody
     public float BoundingRadius;
 
     public Vector3 Color = new(0.8f, 0.8f, 0.8f);
+    // Arena walls/floor are not user-editable. User objects remain selectable even if frozen/static.
+    public bool UserObject = true;
+
+    // Optional toy destruction. Kept deliberately simple: fragile bodies are replaced
+    // by a few smaller pieces when they take a hard enough impact.
+    public bool Breakable;
+    public float BreakThreshold = 7.5f;
+    public int BreakPieces = 8;
 
     public bool Sleeping;
     public float SleepTimer;
+    public bool Touching;   // set each substep if this body had a contact - used for rolling resistance
+    public float RippleCooldown; // small per-body timer so a bobbing body doesn't spam water ripples
+
+    /// <summary>True for a plain single-sphere body (a ball), which gets rolling resistance.</summary>
+    public bool IsBall => Children.Length == 1 && Children[0].Shape == ShapeType.Sphere;
 
     public bool IsStatic => InvMass == 0f;
     public bool Inactive => IsStatic || Sleeping;
@@ -296,6 +309,7 @@ internal sealed class RigidBody
             Restitution = 0.1f,
             Friction = 0.6f,
             BoundingRadius = halfExtents.Length(),
+            UserObject = false,
         };
         b.Proxies = new ShapeProxy[1];
         b.RefreshProxies();
@@ -361,6 +375,113 @@ internal sealed class RigidBody
         b.Proxies = new ShapeProxy[children.Length];
         b.UpdateDerived();
         return b;
+    }
+
+
+    public void SetStatic(bool isStatic)
+    {
+        if (isStatic)
+        {
+            Mass = 0f;
+            InvMass = 0f;
+            InvInertiaLocal = Mat3.Zero;
+            InvInertiaWorld = Mat3.Zero;
+            Velocity = Vector3.Zero;
+            AngularVelocity = Vector3.Zero;
+            Sleeping = true;
+            RefreshProxies();
+            return;
+        }
+
+        RecomputeMass(MathF.Max(Density, 0.001f));
+        Wake();
+    }
+
+    public void RecomputeMass(float density)
+    {
+        Density = MathF.Max(density, 0.001f);
+        float totalMass = 0f;
+        var inertia = Mat3.Zero;
+
+        foreach (ref var c in Children.AsSpan())
+        {
+            var (m, iDiag) = c.MassProperties(Density);
+            totalMass += m;
+
+            var r = Mat3.FromQuaternion(c.LocalRot);
+            var iChild = Mat3.Multiply(Mat3.Multiply(r, Mat3.Diagonal(iDiag)), r.Transposed());
+            var d = c.LocalPos;
+            float dd = d.LengthSquared();
+            var shift = new Mat3
+            {
+                M00 = m * (dd - d.X * d.X),
+                M01 = -m * d.X * d.Y,
+                M02 = -m * d.X * d.Z,
+                M10 = -m * d.Y * d.X,
+                M11 = m * (dd - d.Y * d.Y),
+                M12 = -m * d.Y * d.Z,
+                M20 = -m * d.Z * d.X,
+                M21 = -m * d.Z * d.Y,
+                M22 = m * (dd - d.Z * d.Z),
+            };
+            inertia = Mat3.Add(inertia, Mat3.Add(iChild, shift));
+        }
+
+        Mass = MathF.Max(totalMass, 0.001f);
+        InvMass = 1f / Mass;
+        InvInertiaLocal = inertia.Inverse();
+
+        float br = 0f;
+        foreach (ref var c in Children.AsSpan())
+            br = MathF.Max(br, c.LocalPos.Length() + c.BoundingRadius);
+        BoundingRadius = br;
+        UpdateDerived();
+    }
+
+    public void ScaleUniform(float factor)
+    {
+        factor = Math.Clamp(factor, 0.05f, 20f);
+        for (int i = 0; i < Children.Length; i++)
+        {
+            Children[i].LocalPos *= factor;
+            Children[i].Radius *= factor;
+            Children[i].HalfExtents *= factor;
+            Children[i].HalfHeight *= factor;
+        }
+
+        float br = 0f;
+        foreach (ref var c in Children.AsSpan())
+            br = MathF.Max(br, c.LocalPos.Length() + c.BoundingRadius);
+        BoundingRadius = br;
+
+        if (IsStatic) RefreshProxies();
+        else RecomputeMass(Density);
+        Wake();
+    }
+
+    public RigidBody Clone(Vector3 offset)
+    {
+        var clone = new RigidBody
+        {
+            Children = Children.ToArray(),
+            Position = Position + offset,
+            Rotation = Rotation,
+            Velocity = Vector3.Zero,
+            AngularVelocity = Vector3.Zero,
+            Density = Density,
+            Restitution = Restitution,
+            Friction = Friction,
+            Color = Color,
+            UserObject = true,
+            Breakable = Breakable,
+            BreakThreshold = BreakThreshold,
+            BreakPieces = BreakPieces,
+            Sleeping = false,
+        };
+        clone.Proxies = new ShapeProxy[clone.Children.Length];
+        if (IsStatic) clone.SetStatic(true);
+        else clone.RecomputeMass(Density);
+        return clone;
     }
 
     public void UpdateDerived()
@@ -464,22 +585,108 @@ internal sealed class WaterVolume
     public Vector3 Center;       // center of the XZ footprint
     public float HalfX = 6f, HalfZ = 6f;
     public float SurfaceY = 1.5f;
-    public float Density = 1.0f;
+    public float Density = 1.65f;
     public float LinearDrag = 2.5f;
+    public float WaveAmplitude = 0.22f;
+    public float Time;
+
+    // ---- object-driven ripples (expanding rings spawned when bodies hit/cross the surface) ----
+    private struct Ripple { public float X, Z, Start, Strength; }
+    private readonly List<Ripple> _ripples = new(32);
+    public const int MaxRipples = 24;
+    private const float RippleLife = 1.6f;       // seconds before a ring fades out
+    private const float RippleRingSpeed = 3.2f;  // how fast the ring radius expands (units/s)
+    private const float RippleWaveK = 6.0f;      // spatial frequency of the ring
+    private const float RipplePhaseSpeed = 9.0f;
+
+    /// <summary>Spawn an expanding ripple centered at (x,z). Strength scales its height.</summary>
+    public void Disturb(float x, float z, float strength)
+    {
+        if (_ripples.Count >= MaxRipples) _ripples.RemoveAt(0); // drop the oldest
+        _ripples.Add(new Ripple { X = x, Z = z, Start = Time, Strength = Math.Clamp(strength, 0.02f, 0.6f) });
+    }
+
+    public int RippleCount => _ripples.Count;
+
+    /// <summary>Fills dst with active ripples as (x, z, age, strength) quads; returns the count written.</summary>
+    public int FillRipples(float[] dst, int maxQuads)
+    {
+        int n = 0;
+        foreach (var rp in _ripples)
+        {
+            if (n >= maxQuads) break;
+            float age = Time - rp.Start;
+            if (age < 0f || age > RippleLife) continue;
+            dst[n * 4 + 0] = rp.X;
+            dst[n * 4 + 1] = rp.Z;
+            dst[n * 4 + 2] = age;
+            dst[n * 4 + 3] = rp.Strength;
+            n++;
+        }
+        return n;
+    }
 
     public bool ContainsColumn(Vector3 p)
         => MathF.Abs(p.X - Center.X) <= HalfX && MathF.Abs(p.Z - Center.Z) <= HalfZ;
+
+    public void Step(float h)
+    {
+        Time += h;
+        // prune dead ripples
+        for (int i = _ripples.Count - 1; i >= 0; i--)
+            if (Time - _ripples[i].Start > RippleLife) _ripples.RemoveAt(i);
+    }
+
+    private float RippleHeightAt(float x, float z)
+    {
+        if (_ripples.Count == 0) return 0f;
+        float sum = 0f;
+        foreach (var rp in _ripples)
+        {
+            float age = Time - rp.Start;
+            if (age < 0f || age > RippleLife) continue;
+            float dx = x - rp.X, dz = z - rp.Z;
+            float dist = MathF.Sqrt(dx * dx + dz * dz);
+            float fade = 1f - age / RippleLife;                       // overall decay
+            float ringR = age * RippleRingSpeed;                      // current ring radius
+            float band = MathF.Exp(-2.5f * MathF.Abs(dist - ringR));  // localize at the ring
+            sum += rp.Strength * fade * band * MathF.Sin(dist * RippleWaveK - age * RipplePhaseSpeed);
+        }
+        return sum;
+    }
+
+    public float SurfaceAt(float x, float z)
+    {
+        float w1 = MathF.Sin(x * 1.15f + Time * 1.35f) * 0.55f;
+        float w2 = MathF.Sin(z * 1.75f + Time * 1.85f) * 0.30f;
+        float w3 = MathF.Sin((x + z) * 0.80f + Time * 1.10f) * 0.25f;
+        return SurfaceY + WaveAmplitude * (w1 + w2 + w3) + RippleHeightAt(x, z);
+    }
 
     public void Apply(RigidBody b, Vector3 gravity, float h)
     {
         if (!ContainsColumn(b.Position)) return;
 
         float r = b.BoundingRadius;
+        float surfaceY = SurfaceAt(b.Position.X, b.Position.Z);
+
+        // spawn a ripple when a body crosses / churns the surface (throttled per body)
+        if (b.RippleCooldown <= 0f && MathF.Abs(b.Position.Y - surfaceY) < r + 0.15f)
+        {
+            float horiz = MathF.Sqrt(b.Velocity.X * b.Velocity.X + b.Velocity.Z * b.Velocity.Z);
+            float speed = MathF.Abs(b.Velocity.Y) + 0.35f * horiz;
+            if (speed > 1.0f)
+            {
+                Disturb(b.Position.X, b.Position.Z, 0.05f * MathF.Min(speed, 8f) * MathF.Min(2f * r, 1.5f));
+                b.RippleCooldown = 0.10f;
+            }
+        }
+
         float bottom = b.Position.Y - r;
-        if (bottom >= SurfaceY) return; // fully above the surface
+        if (bottom >= surfaceY) return; // fully above the surface
 
         // crude submerged fraction from the bounding sphere - smooth enough for bobbing
-        float submerged = Math.Clamp((SurfaceY - bottom) / (2f * r), 0f, 1f);
+        float submerged = Math.Clamp((surfaceY - bottom) / (2f * r), 0f, 1f);
 
         float g = gravity.Length();
         if (g > 1e-4f)
@@ -503,14 +710,16 @@ internal sealed class WaterVolume
 /// </summary>
 internal sealed class Joint
 {
-    public enum Kind { Point, Distance, Rope }
+    public enum Kind { Point, Distance, Rope, Spring }
 
     public Kind Type;
     public RigidBody A = null!;
     public RigidBody? B;          // null => anchored to the world at AnchorB (world space)
     public Vector3 LocalA;        // attach point in A's local frame
     public Vector3 LocalB;        // in B's local frame, or world point if B is null
-    public float Length;          // for Distance / Rope
+    public float Length;          // for Distance / Rope / Spring
+    public float Stiffness = 18f;  // for Spring
+    public float Damping = 2.2f;    // for Spring
 
     // recomputed each substep
     private Vector3 _rA, _rB, _worldA, _worldB;
@@ -579,11 +788,22 @@ internal sealed class Joint
         else
         {
             float c = (_worldB - _worldA).Length() - Length;
+            float vrel = Vector3.Dot(VelB - VelA, _axis);
+
+            if (Type == Kind.Spring)
+            {
+                // Soft distance link. Unlike Distance/Rope, it deliberately overshoots and oscillates.
+                // _axisMass keeps heavy/light pairs from exploding too easily.
+                float jn = -(Stiffness * c + Damping * vrel) * h * _axisMass;
+                jn = Math.Clamp(jn, -2.5f, 2.5f);
+                ApplyImpulse(_axis * jn);
+                return;
+            }
+
             if (Type == Kind.Rope && c < 0f) return; // slack rope does nothing
 
-            float vrel = Vector3.Dot(VelB - VelA, _axis);
-            float jn = -(vrel + beta / h * c) * _axisMass;
-            ApplyImpulse(_axis * jn);
+            float jnRigid = -(vrel + beta / h * c) * _axisMass;
+            ApplyImpulse(_axis * jnRigid);
         }
     }
 
@@ -653,6 +873,11 @@ internal sealed class PhysicsWorld
     private const float Slop = 0.008f;
     private const float RestitutionThreshold = 1.0f;
 
+    // rolling resistance for balls in contact (per second); tuned so a ball coasts to rest
+    // in a couple of seconds instead of rolling indefinitely
+    private const float RollAngularDamp = 1.6f;
+    private const float RollLinearDamp = 0.9f;
+
     // sleeping: a body below both velocity thresholds for SleepDelay seconds nods off
     private const float SleepLinVelSq = 0.08f * 0.08f;
     private const float SleepAngVelSq = 0.30f * 0.30f;
@@ -678,6 +903,7 @@ internal sealed class PhysicsWorld
 
     private readonly List<Contact> _contacts = [];
     private float _accumulator;
+    private readonly Random _breakRng = new(24680);
 
     public RigidBody? Grabbed;
     public Vector3 GrabLocalAnchor;
@@ -722,6 +948,7 @@ internal sealed class PhysicsWorld
 
     private void SubStep(float h)
     {
+        foreach (var w in Waters) w.Step(h);
         foreach (var b in Bodies)
         {
             if (b.Inactive) continue;
@@ -732,7 +959,9 @@ internal sealed class PhysicsWorld
         ApplyDragSpring(h);
 
         _contacts.Clear();
+        foreach (var b in Bodies) b.Touching = false;
         GenerateContacts();
+        foreach (var c in _contacts) { c.A.Touching = true; c.B.Touching = true; }
 
         // joints share the solver with contacts: wake the pairs first so a tug on one
         // end of a chain travels down it, then interleave the iterations
@@ -750,6 +979,7 @@ internal sealed class PhysicsWorld
 
         StoreWarmCache();
         CollectImpacts();
+        BreakBodiesFromImpacts();
 
         foreach (var b in Bodies)
         {
@@ -770,10 +1000,27 @@ internal sealed class PhysicsWorld
 
             b.BiasVelocity = Vector3.Zero;
             b.BiasAngularVelocity = Vector3.Zero;
+            if (b.RippleCooldown > 0f) b.RippleCooldown -= h;
 
             // mild damping keeps stacks from buzzing
             b.Velocity *= 1f / (1f + 0.02f * h);
             b.AngularVelocity *= 1f / (1f + 0.08f * h);
+
+            // rolling resistance: a ball resting on a surface should coast to a stop, not
+            // roll forever (wind-pushed balls, the domino striker, thrown bowling balls).
+            // Only applied to balls that are actually touching something, so airborne or
+            // floating spheres are unaffected.
+            if (b.IsBall && b.Touching)
+            {
+                b.AngularVelocity *= 1f / (1f + RollAngularDamp * h);
+                // shave the horizontal glide too; gravity-aligned (fall) component is left alone
+                var v = b.Velocity;
+                var up = Vector3.UnitY;
+                var vUp = Vector3.Dot(v, up) * up;
+                var vFlat = v - vUp;
+                vFlat *= 1f / (1f + RollLinearDamp * h);
+                b.Velocity = vFlat + vUp;
+            }
 
             // sleep bookkeeping
             if (b.Velocity.LengthSquared() < SleepLinVelSq
@@ -817,6 +1064,125 @@ internal sealed class PhysicsWorld
         foreach (var c in _contacts)
             if (c.ImpactSpeed > ImpactSparkSpeed)
                 Impacts.Add((c.Point, c.Normal, c.ImpactSpeed));
+    }
+
+    private void BreakBodiesFromImpacts()
+    {
+        if (_contacts.Count == 0 || Bodies.Count > 520) return;
+
+        var toBreak = new HashSet<RigidBody>();
+        foreach (var c in _contacts)
+        {
+            if (c.ImpactSpeed < 1f) continue;
+            TryMarkBreakable(c.A, c.ImpactSpeed, toBreak);
+            TryMarkBreakable(c.B, c.ImpactSpeed, toBreak);
+        }
+
+        foreach (var b in toBreak)
+            BreakBody(b);
+    }
+
+    private static void TryMarkBreakable(RigidBody b, float impactSpeed, HashSet<RigidBody> toBreak)
+    {
+        if (b.IsStatic || !b.UserObject || !b.Breakable) return;
+        if (b.BoundingRadius < 0.16f) return;
+        if (impactSpeed >= MathF.Max(0.5f, b.BreakThreshold))
+            toBreak.Add(b);
+    }
+
+    private void BreakBody(RigidBody b)
+    {
+        if (!Bodies.Contains(b)) return;
+
+        var pieces = new List<RigidBody>(Math.Clamp(b.BreakPieces, 3, 18));
+        foreach (var child in b.Children)
+            CreateBreakPiecesForChild(b, child, pieces);
+
+        if (pieces.Count == 0) return;
+
+        var originalVel = b.Velocity;
+        var originalAng = b.AngularVelocity;
+        var color = b.Color;
+
+        RemoveBody(b);
+
+        foreach (var p in pieces)
+        {
+            p.Color = Vector3.Clamp(color * (0.75f + (float)_breakRng.NextDouble() * 0.35f), Vector3.Zero, Vector3.One);
+            p.Friction = b.Friction;
+            p.Restitution = MathF.Max(b.Restitution, 0.18f);
+            p.Breakable = false; // one-level fracture keeps runaway debris under control
+            p.BreakThreshold = b.BreakThreshold;
+            p.Velocity = originalVel + RandomUnit() * (1.0f + (float)_breakRng.NextDouble() * 2.5f);
+            p.AngularVelocity = originalAng + RandomUnit() * (2.0f + (float)_breakRng.NextDouble() * 5.0f);
+            p.UserObject = true;
+            p.Wake();
+            Bodies.Add(p);
+        }
+    }
+
+    private void CreateBreakPiecesForChild(RigidBody source, ChildShape child, List<RigidBody> pieces)
+    {
+        var childPos = source.Position + Vector3.Transform(child.LocalPos, source.Rotation);
+        var childRot = Quat.Mul(source.Rotation, child.LocalRot);
+        int maxPieces = Math.Clamp(source.BreakPieces, 3, 18);
+
+        if (child.Shape == ShapeType.Box)
+        {
+            var he = child.HalfExtents;
+            if (he.LengthSquared() < 0.03f) return;
+
+            var smallHe = Vector3.Max(he * 0.46f, new Vector3(0.06f));
+            int made = 0;
+            for (int sx = -1; sx <= 1 && made < maxPieces; sx += 2)
+            for (int sy = -1; sy <= 1 && made < maxPieces; sy += 2)
+            for (int sz = -1; sz <= 1 && made < maxPieces; sz += 2)
+            {
+                var local = new Vector3(sx * he.X * 0.48f, sy * he.Y * 0.48f, sz * he.Z * 0.48f);
+                var p = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), smallHe, MathF.Max(source.Density, 0.001f));
+                p.Rotation = childRot;
+                p.UpdateDerived();
+                pieces.Add(p);
+                made++;
+            }
+            return;
+        }
+
+        if (child.Shape == ShapeType.Sphere)
+        {
+            float r = MathF.Max(child.Radius * 0.42f, 0.055f);
+            int count = Math.Min(maxPieces, 7);
+            for (int i = 0; i < count; i++)
+            {
+                var dir = RandomUnit();
+                var p = RigidBody.CreateSphere(childPos + dir * child.Radius * 0.38f, r, MathF.Max(source.Density, 0.001f));
+                pieces.Add(p);
+            }
+            return;
+        }
+
+        // Capsules are approximated by bead-like fragments.
+        if (child.Shape == ShapeType.Capsule)
+        {
+            float r = MathF.Max(child.Radius * 0.38f, 0.05f);
+            int count = Math.Min(maxPieces, 6);
+            for (int i = 0; i < count; i++)
+            {
+                float u = count == 1 ? 0f : (i / (float)(count - 1) - 0.5f) * child.HalfHeight * 2f;
+                var local = new Vector3(0, u, 0) + RandomUnit() * child.Radius * 0.2f;
+                var p = RigidBody.CreateSphere(childPos + Vector3.Transform(local, childRot), r, MathF.Max(source.Density, 0.001f));
+                pieces.Add(p);
+            }
+        }
+    }
+
+    private Vector3 RandomUnit()
+    {
+        var v = new Vector3(
+            (float)_breakRng.NextDouble() * 2f - 1f,
+            (float)_breakRng.NextDouble() * 2f - 1f,
+            (float)_breakRng.NextDouble() * 2f - 1f);
+        return v.LengthSquared() > 1e-6f ? Vector3.Normalize(v) : Vector3.UnitY;
     }
 
     /// <summary>Drops a body and any joints that referenced it. Keeps the world consistent.</summary>
@@ -863,23 +1229,98 @@ internal sealed class PhysicsWorld
             }
         }
 
-        for (int i = 0; i < Bodies.Count; i++)
-            for (int j = i + 1; j < Bodies.Count; j++)
+        // --- broad phase ---
+        // Small bodies go into a uniform spatial hash so we only test nearby pairs instead
+        // of every pair (the old O(n^2) loop is what made big collapses crawl). A few "huge"
+        // bodies (the arena walls) would blow up the cell size, so they're tested separately
+        // against everything - there are only a handful of them.
+        int count = Bodies.Count;
+
+        float maxR = 0f;
+        for (int i = 0; i < count; i++)
+        {
+            float r = Bodies[i].BoundingRadius;
+            if (r <= HugeRadius && r > maxR) maxR = r;
+        }
+        _cellSize = Math.Clamp(2f * maxR, 0.6f, 2f * HugeRadius);
+
+        if (_next.Length < count) _next = new int[Math.Max(count, 64)];
+        _cellHead.Clear();
+
+        for (int i = 0; i < count; i++)
+        {
+            var b = Bodies[i];
+            if (b.BoundingRadius > HugeRadius) continue; // huge bodies handled below
+            long key = CellKey(b.Position);
+            _next[i] = _cellHead.TryGetValue(key, out int head) ? head : -1;
+            _cellHead[key] = i;
+        }
+
+        // small vs small: scan each body's 3x3x3 cell neighbourhood; j>i keeps each pair once
+        for (int i = 0; i < count; i++)
+        {
+            var a = Bodies[i];
+            if (a.BoundingRadius > HugeRadius) continue;
+            (int cx, int cy, int cz) = CellCoords(a.Position);
+            for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
             {
-                var a = Bodies[i];
-                var b = Bodies[j];
-                if (a.Inactive && b.Inactive) continue;
+                if (!_cellHead.TryGetValue(PackKey(cx + dx, cy + dy, cz + dz), out int j)) continue;
+                while (j != -1)
+                {
+                    if (j > i) NarrowPhase(a, Bodies[j]);
+                    j = _next[j];
+                }
+            }
+        }
 
-                float rr = a.BoundingRadius + b.BoundingRadius;
-                if ((b.Position - a.Position).LengthSquared() > rr * rr) continue;
+        // huge bodies (walls) vs everything; keep A = lower index so warm-start keys are stable
+        for (int p = 0; p < count; p++)
+        {
+            if (Bodies[p].BoundingRadius <= HugeRadius) continue;
+            for (int q = 0; q < count; q++)
+            {
+                if (q == p) continue;
+                bool qHuge = Bodies[q].BoundingRadius > HugeRadius;
+                if (qHuge && q < p) continue; // huge-huge pair handled once
+                int lo = Math.Min(p, q), hi = Math.Max(p, q);
+                NarrowPhase(Bodies[lo], Bodies[hi]);
+            }
+        }
+    }
 
-                foreach (ref var pa in a.Proxies.AsSpan())
-                    foreach (ref var pb in b.Proxies.AsSpan())
-                    {
-                        float prr = pa.BoundingRadius + pb.BoundingRadius;
-                        if ((pb.Position - pa.Position).LengthSquared() > prr * prr) continue;
-                        Dispatch(in pa, in pb);
-                    }
+    private const float HugeRadius = 4f;
+    private readonly Dictionary<long, int> _cellHead = new();
+    private int[] _next = [];
+    private float _cellSize = 1f;
+
+    private (int, int, int) CellCoords(Vector3 p)
+        => ((int)MathF.Floor(p.X / _cellSize), (int)MathF.Floor(p.Y / _cellSize), (int)MathF.Floor(p.Z / _cellSize));
+
+    private long CellKey(Vector3 p)
+    {
+        var (cx, cy, cz) = CellCoords(p);
+        return PackKey(cx, cy, cz);
+    }
+
+    // exact (collision-free) packing of cell coords in +/-2^20 cells into one long
+    private static long PackKey(int x, int y, int z)
+        => ((long)(x & 0x1FFFFF) << 42) | ((long)(y & 0x1FFFFF) << 21) | (long)(z & 0x1FFFFF);
+
+    private void NarrowPhase(RigidBody a, RigidBody b)
+    {
+        if (a.Inactive && b.Inactive) return;
+
+        float rr = a.BoundingRadius + b.BoundingRadius;
+        if ((b.Position - a.Position).LengthSquared() > rr * rr) return;
+
+        foreach (ref var pa in a.Proxies.AsSpan())
+            foreach (ref var pb in b.Proxies.AsSpan())
+            {
+                float prr = pa.BoundingRadius + pb.BoundingRadius;
+                if ((pb.Position - pa.Position).LengthSquared() > prr * prr) continue;
+                Dispatch(in pa, in pb);
             }
     }
 

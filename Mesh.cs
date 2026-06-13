@@ -185,4 +185,37 @@ internal sealed class Mesh
         uint[] idx = { 0, 2, 1, 0, 3, 2 }; // CCW seen from above (+Y)
         return new Mesh(verts, idx);
     }
+    /// <summary>Tessellated unit quad at y = 0, normal up. Used for the animated water surface.</summary>
+    public static Mesh CreateGridPlane(int cells = 64)
+    {
+        var verts = new List<float>();
+        var idx = new List<uint>();
+
+        for (int z = 0; z <= cells; z++)
+        {
+            float vz = -1f + 2f * z / cells;
+            for (int x = 0; x <= cells; x++)
+            {
+                float vx = -1f + 2f * x / cells;
+                verts.Add(vx); verts.Add(0f); verts.Add(vz);
+                verts.Add(0f); verts.Add(1f); verts.Add(0f);
+                verts.Add((float)x / cells); verts.Add((float)z / cells);
+            }
+        }
+
+        int stride = cells + 1;
+        for (int z = 0; z < cells; z++)
+        for (int x = 0; x < cells; x++)
+        {
+            uint a = (uint)(z * stride + x);
+            uint b = a + 1;
+            uint c = (uint)((z + 1) * stride + x);
+            uint d = c + 1;
+            idx.Add(a); idx.Add(d); idx.Add(b);
+            idx.Add(a); idx.Add(c); idx.Add(d);
+        }
+
+        return new Mesh(verts.ToArray(), idx.ToArray());
+    }
+
 }
