@@ -210,6 +210,9 @@ internal sealed partial class GlPanel : Control
     private readonly List<Particle> _particles = new(512);
     private const int MaxParticles = 600;
 
+    // ---- ragdolls (the 3D People Playground "toy"; see Ragdoll.cs) ----
+    private readonly RagdollSystem _ragdolls = new();
+
     // ---- lightweight feedback sounds / water-entry tracking ----
     private bool _soundEnabled = false;
     private double _nextImpactSound, _nextSplashSound, _nextExplosionSound;
@@ -504,6 +507,7 @@ internal sealed partial class GlPanel : Control
         UpdateTriggers(simDt);
         SpawnEffectsFromWorld();
         UpdateParticles(simDt);
+        _ragdolls.Update(simDt, _world);
         UpdateChallenge(simDt);
 
         RenderShadowPass();
@@ -726,6 +730,7 @@ internal sealed partial class GlPanel : Control
             case 0x37: CancelPendingSceneAction(); SpawnBody(7); break;              // 7 hammer
             case 0x38: CancelPendingSceneAction(); SpawnBody(8); break;              // 8 table
             case 0x39: CancelPendingSceneAction(); SpawnBowlingPins(); break;        // 9 bowling pins
+            case 0x30: CancelPendingSceneAction(); SpawnRagdollAtAim(); break;        // 0 ragdoll
             case 0x4C: CancelPendingSceneAction(); DropChain(); break;               // L  chain
             case 0x56: CancelPendingSceneAction(); ToggleWater(); break;             // V  water
             case 0x5A: CancelPendingSceneAction(); AddField(ForceField.Kind.Attract); break; // Z
@@ -1717,6 +1722,14 @@ internal sealed partial class GlPanel : Control
         _aimValid = false;
     }
 
+    /// <summary>Drop a humanoid ragdoll at the aim point (floor under the cursor), else near origin.</summary>
+    private void SpawnRagdollAtAim()
+    {
+        EvictIfFull();
+        var foot = _aimValid ? _aimPoint : new Vector3(0f, 0f, 0f);
+        _ragdolls.Spawn(_world, foot);
+    }
+
     /// <summary>Fire a ball from the camera toward wherever the mouse is aiming.</summary>
     private void ShootBall()
     {
@@ -1949,6 +1962,7 @@ internal sealed partial class GlPanel : Control
         _world.Joints.Clear();
         _world.Bodies.RemoveAll(b => !b.IsStatic);
         _particles.Clear();
+        _ragdolls.Clear();
         _waterTouchState.Clear();
         _triggers.Clear();
         ClearChallenge();
@@ -2762,6 +2776,13 @@ internal sealed partial class GlPanel : Control
                 // Affected bodies get a visible tint and a faint glow, so the user sees what the field is touching.
                 color = color * 0.65f + fieldColor * 0.65f;
                 GL.Uniform1(_uEmissive, 0.35f);
+            }
+            else if (RagdollSystem.TryTint(b, out var boneColor, out float boneGlow))
+            {
+                // Ragdoll bones: skin tone reddening with damage, brief flash when hit, dimmer when dead.
+                if (b != _selectedBody && b != _world.Grabbed && b != _jointFirstBody)
+                    color = b.Sleeping ? boneColor * 0.72f : boneColor;
+                GL.Uniform1(_uEmissive, boneGlow);
             }
             else
             {

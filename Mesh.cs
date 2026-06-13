@@ -1,5 +1,4 @@
-﻿using MakarovPhysicsSandbox;
-using System.Numerics;
+﻿using System.Numerics;
 
 namespace MakarovPhysicsSandbox;
 

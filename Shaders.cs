@@ -1,6 +1,4 @@
-﻿using MakarovPhysicsSandbox;
-
-namespace MakarovPhysicsSandbox;
+﻿namespace MakarovPhysicsSandbox;
 
 /// <summary>GLSL sources and a small compile/link helper.</summary>
 internal static class Shaders

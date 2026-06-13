@@ -13,7 +13,6 @@ internal static class Win32
     public const uint CS_OWNDC = 0x0020;
     public const uint CS_HREDRAW = 0x0002;
     public const uint CS_VREDRAW = 0x0001;
-
     public const uint WM_DESTROY = 0x0002;
     public const uint WM_SIZE = 0x0005;
     public const uint WM_CLOSE = 0x0010;

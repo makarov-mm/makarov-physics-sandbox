@@ -91,7 +91,7 @@ internal static class GL
 
     public static void TexImage2D(uint target, int level, int internalFormat, int w, int h, int border, uint format, uint type, byte[] pixels)
     {
-        var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+        var handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
         try { TexImage2D(target, level, internalFormat, w, h, border, format, type, handle.AddrOfPinnedObject()); }
         finally { handle.Free(); }
     }

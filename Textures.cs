@@ -1,6 +1,4 @@
-﻿using MakarovPhysicsSandbox;
-
-namespace MakarovPhysicsSandbox;
+﻿namespace MakarovPhysicsSandbox;
 
 /// <summary>
 /// Procedural textures, generated at startup. No image files, no loaders - a couple

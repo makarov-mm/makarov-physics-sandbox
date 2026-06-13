@@ -242,6 +242,9 @@ internal sealed class RigidBody
     // Arena walls/floor are not user-editable. User objects remain selectable even if frozen/static.
     public bool UserObject = true;
 
+    // Optional gameplay back-reference (e.g. the RagdollBone this body belongs to). Physics never reads it.
+    public object? Tag;
+
     // Optional toy destruction. Kept deliberately simple: fragile bodies are replaced
     // by a few smaller pieces when they take a hard enough impact.
     public bool Breakable;
@@ -612,11 +615,11 @@ internal sealed class WaterVolume
     public int FillRipples(float[] dst, int maxQuads)
     {
         int n = 0;
-        foreach (var rp in _ripples)
+        foreach (Ripple rp in _ripples)
         {
             if (n >= maxQuads) break;
             float age = Time - rp.Start;
-            if (age < 0f || age > RippleLife) continue;
+            if (age is < 0f or > RippleLife) continue;
             dst[n * 4 + 0] = rp.X;
             dst[n * 4 + 1] = rp.Z;
             dst[n * 4 + 2] = age;
@@ -1803,7 +1806,7 @@ internal sealed class PhysicsWorld
         _warmCache.Clear();
         foreach (var c in _contacts)
         {
-            if (c.Pn == 0f && c.Pt1 == 0f && c.Pt2 == 0f) continue;
+            if (c is { Pn: 0f, Pt1: 0f, Pt2: 0f }) continue;
             var key = (c.A, c.B);
             if (!_warmCache.TryGetValue(key, out var list))
                 _warmCache[key] = list = [];
