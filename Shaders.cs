@@ -14,6 +14,7 @@ internal static class Shaders
         uniform mat4 uProj;
         uniform mat4 uLightVP;
         uniform float uUvScale;
+        uniform float uWorldUv;     // >0.5 = derive UVs from world-space box face (constant tile size)
         uniform float uTime;
         uniform float uWaterWaveAmp;
         uniform int  uRippleCount;
@@ -65,7 +66,22 @@ internal static class Shaders
                          + 0.80 * 0.25 * cos((x + z) * 0.80 + t * 1.10));
                 vNormal = normalize(vec3(-dx, 1.0, -dz));
             }
-            vUV = aUV * uUvScale;
+            if (uWorldUv > 0.5)
+            {
+                // World-space box tiling: pick the face plane from the dominant normal axis
+                // and derive UVs from world coordinates, so every face tiles at a constant
+                // real-world size (no stretching on long/tall walls regardless of aspect).
+                vec3 an = abs(aNormal);
+                vec2 wuv;
+                if (an.x >= an.y && an.x >= an.z)      wuv = world.zy;
+                else if (an.z >= an.x && an.z >= an.y) wuv = world.xy;
+                else                                   wuv = world.xz;
+                vUV = wuv * uUvScale;
+            }
+            else
+            {
+                vUV = aUV * uUvScale;
+            }
             vLightSpacePos = uLightVP * world;
             gl_Position = uProj * uView * world;
         }

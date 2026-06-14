@@ -156,3 +156,18 @@ Design note: these are deliberately framed as toys/showcase objects, not as anot
 - Ragdoll joint-stress iteration now guards against mid-loop muscle removal after limb severing, fixing a crash observed when an android broke apart in/near the cart.
 
 Current visual rule: physics shapes may stay simplified, but important props can use richer visual overlays/textures when this improves readability.
+
+## M4.7 object variety / prop polish notes
+
+New gameplay props added in this pass:
+
+- **Cylinder** — generic metal cylinder using a capsule physics proxy.
+- **Explosive barrel** — still capsule-proxy physics, but visually treated as a proper warning-labelled drum.
+- **Gas cylinder** — smaller explosive pressure-vessel style prop.
+- **Beach ball** — light, very bouncy and buoyant toy object.
+- **Metal cube** — heavy conductive object for crush/impact/electricity tests.
+- **Sentinel bot** — additional synthetic target distinct from android, drone and vehicles.
+- **Police car / ambulance** — vehicle variants for bridge/crash scenes.
+
+Catapult launchers should be treated as triggerable toys now: placing one should not immediately fire. Use trigger outputs with `LaunchCatapult` near the launcher to fire it as part of a chain reaction.
+

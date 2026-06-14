@@ -352,3 +352,15 @@ open one and inspect its trigger outputs to see the pattern.
 - Ragdoll joint-stress iteration now guards against mid-loop muscle removal after limb severing, fixing a crash observed when an android broke apart in/near the cart.
 
 Current visual rule: physics shapes may stay simplified, but important props can use richer visual overlays/textures when this improves readability.
+
+- **2026-06-14 — M4.7 object variety / barrel-cylinder / sound / prop polish pass**
+  - Sound is now enabled by default.
+  - Added new player-facing objects: generic cylinder, beach ball, metal cube, gas cylinder, sentinel bot target, police car and ambulance variants.
+  - Reworked explosive barrel visuals around a cleaner authored texture with an explosive warning label; removed the heavy horizontal mesh bands that made it look like stacked plates.
+  - Catapult launcher no longer fires immediately when placed; it now places an armed launcher/projectile and can be triggered through the new `LaunchCatapult` trigger action.
+  - Wooden cart has separate rolling wheel bodies connected to the cart body, instead of static visual wheels.
+  - Drone hover was made more robust by increasing its break threshold.
+  - Wood props spawned from the basic object tools are now breakable by default with a lower break threshold.
+  - Hammer and dumbbell compound shapes were adjusted so handles and metal parts overlap visually instead of appearing detached.
+  - Impact/break sounds were rate-limited and lowered to avoid noisy machine-gun audio from piles of small debris.
+

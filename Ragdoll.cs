@@ -85,7 +85,7 @@ internal sealed class Ragdoll
     public bool Alive = true;
 
     // ---- tunables (shared defaults; exposed so they can be tweaked live while tuning feel) ----
-    public const float UprightStrength = 2.2f;    // pelvis self-righting while alive (0 = no balancing)
+    public const float UprightStrength = 4.6f;    // pelvis self-righting while alive (0 = no balancing)
 
     public Vector3 Center => Pelvis.Body.Position;
 
@@ -118,8 +118,8 @@ internal sealed class RagdollSystem
     private const float ChildShare = 0.85f;    // reaction split: child moves more than the parent
     private const float ParentShare = 0.15f;
     private const float MaxDeltaW = 7.5f;      // clamp per-bone angular-velocity change per step (rad/s)
-    private const float MuscleStiffnessScale = 1.35f; // global convergence multiplier (stand-assist pose hold)
-    private const float MuscleStrengthScale = 1.25f;  // global proportional-gain multiplier
+    private const float MuscleStiffnessScale = 2.10f; // global convergence multiplier (stand-assist pose hold)
+    private const float MuscleStrengthScale = 1.85f;  // global proportional-gain multiplier
 
     // Android damage gameplay: joints are not just decorative rods. Hurt, burning or shocked
     // limbs become easier to detach, which gives the sandbox the expected crash-test feel.
@@ -377,8 +377,8 @@ internal sealed class RagdollSystem
             lateralError = Vector3.Normalize(lateralError) * maxError;
 
         // Pull the pelvis back over the lower legs and damp excessive spin. Hard hits still overpower this.
-        pelvis.Velocity += lateralError * Math.Clamp(5.5f * dt, 0f, 0.22f);
-        pelvis.AngularVelocity *= MathF.Pow(0.55f, dt);
+        pelvis.Velocity += lateralError * Math.Clamp(9.0f * dt, 0f, 0.36f);
+        pelvis.AngularVelocity *= MathF.Pow(0.38f, dt);
         pelvis.Wake();
     }
 
