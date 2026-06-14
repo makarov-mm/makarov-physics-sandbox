@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Media;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -315,6 +314,7 @@ internal sealed partial class GlPanel : Control
     // ---- lightweight feedback sounds / water-entry tracking ----
     private bool _soundEnabled = false;
     private double _nextImpactSound, _nextSplashSound, _nextExplosionSound;
+    private double _nextBreakSound, _nextZapSound, _nextFireSound;
     private readonly Dictionary<RigidBody, bool> _waterTouchState = new();
 
     // ---- interactive triggers / pressure plates ----
@@ -417,6 +417,7 @@ internal sealed partial class GlPanel : Control
             _hglrc = IntPtr.Zero;
         }
         if (_hdc != IntPtr.Zero) { Win32.ReleaseDC(_hwnd, _hdc); _hdc = IntPtr.Zero; }
+        if (disposing) Audio.Shutdown();
         base.Dispose(disposing);
     }
 
@@ -3296,6 +3297,7 @@ internal sealed partial class GlPanel : Control
         foreach (var e in _world.BreakEvents)
         {
             float power = Math.Clamp(e.Speed / 10f, 0.45f, 2.2f);
+            PlayBreakSound(e.MaterialId, power);
             switch (e.MaterialId)
             {
                 case MaterialId.Wood:
@@ -3491,6 +3493,7 @@ internal sealed partial class GlPanel : Control
     {
         if (dt <= 0f) return;
 
+        int burningCount = 0;
         // VFX polish pass: fire is now three layers, not just a tint:
         //  - orange/yellow flame beads close to the body;
         //  - darker smoke that rises slower and lives longer;
@@ -3498,6 +3501,7 @@ internal sealed partial class GlPanel : Control
         foreach (var b in _world.Bodies)
         {
             if (!b.Burning) continue;
+            burningCount++;
 
             bool android = b.Tag is RagdollBone rb && rb.Android;
             float scale = Math.Clamp(b.BoundingRadius, 0.18f, 1.2f);
@@ -3553,6 +3557,8 @@ internal sealed partial class GlPanel : Control
                     true);
             }
         }
+
+        PlayFireSound(burningCount);
     }
 
     private void SpawnElectricityEffects(float dt)
@@ -3708,6 +3714,7 @@ internal sealed partial class GlPanel : Control
     private void SpawnElectricArc(Vector3 a, Vector3 b, float power)
     {
         if (_beams.Count >= MaxBeams) return;
+        PlayZapSound(power);
 
         var d = b - a;
         float len = d.Length();
@@ -3813,8 +3820,12 @@ internal sealed partial class GlPanel : Control
         if (!_soundEnabled) return;
         double now = _sw.Elapsed.TotalSeconds;
         if (now < _nextImpactSound) return;
-        _nextImpactSound = now + 0.09;
-        PlaySystemSound(speed > 8f ? SystemSounds.Hand : SystemSounds.Beep);
+        _nextImpactSound = now + 0.06;
+        bool hard = speed > 8f;
+        // louder + lower-pitched the harder the hit; small random pitch spread avoids machine-gun sameness
+        float gain = Math.Clamp(0.25f + speed * 0.06f, 0.25f, 1.1f);
+        float pitch = (hard ? 0.85f : 1.0f) + (float)(_rng.NextDouble() - 0.5) * 0.12f;
+        Audio.Play(hard ? Sound.ImpactHard : Sound.ImpactSoft, gain, pitch);
     }
 
     private void PlaySplashSound()
@@ -3822,8 +3833,8 @@ internal sealed partial class GlPanel : Control
         if (!_soundEnabled) return;
         double now = _sw.Elapsed.TotalSeconds;
         if (now < _nextSplashSound) return;
-        _nextSplashSound = now + 0.18;
-        PlaySystemSound(SystemSounds.Asterisk);
+        _nextSplashSound = now + 0.16;
+        Audio.Play(Sound.Splash, 0.7f, 0.95f + (float)(_rng.NextDouble() - 0.5) * 0.1f);
     }
 
     private void PlayExplosionSound()
@@ -3831,14 +3842,40 @@ internal sealed partial class GlPanel : Control
         if (!_soundEnabled) return;
         double now = _sw.Elapsed.TotalSeconds;
         if (now < _nextExplosionSound) return;
-        _nextExplosionSound = now + 0.25;
-        PlaySystemSound(SystemSounds.Exclamation);
+        _nextExplosionSound = now + 0.18;
+        Audio.Play(Sound.Explosion, 1.0f, 0.9f + (float)(_rng.NextDouble() - 0.5) * 0.15f);
     }
 
-    private static void PlaySystemSound(SystemSound sound)
+    private void PlayBreakSound(MaterialId material, float power)
     {
-        try { sound.Play(); }
-        catch { /* sound is non-critical feedback */ }
+        if (!_soundEnabled) return;
+        double now = _sw.Elapsed.TotalSeconds;
+        if (now < _nextBreakSound) return;
+        _nextBreakSound = now + 0.05;
+        bool shatter = material is MaterialId.Glass or MaterialId.Ice;
+        Audio.Play(shatter ? Sound.BreakGlass : Sound.BreakWood,
+                   Math.Clamp(0.5f + power * 0.25f, 0.4f, 1.1f),
+                   0.95f + (float)(_rng.NextDouble() - 0.5) * 0.2f);
+    }
+
+    private void PlayZapSound(float power)
+    {
+        if (!_soundEnabled) return;
+        double now = _sw.Elapsed.TotalSeconds;
+        if (now < _nextZapSound) return;
+        _nextZapSound = now + 0.07;
+        Audio.Play(Sound.Zap, Math.Clamp(0.35f + power * 0.3f, 0.3f, 1.0f),
+                   0.9f + (float)(_rng.NextDouble() - 0.5) * 0.3f);
+    }
+
+    private void PlayFireSound(int burningCount)
+    {
+        if (!_soundEnabled || burningCount <= 0) return;
+        double now = _sw.Elapsed.TotalSeconds;
+        if (now < _nextFireSound) return;
+        _nextFireSound = now + 0.11;   // periodic crackle while anything burns
+        Audio.Play(Sound.FireCrackle, Math.Clamp(0.25f + burningCount * 0.08f, 0.25f, 0.8f),
+                   0.85f + (float)(_rng.NextDouble() - 0.5) * 0.35f);
     }
 
     private void UpdateDroneHover(float dt)
