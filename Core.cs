@@ -9,15 +9,52 @@ namespace MakarovPhysicsSandbox;
 
 internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
 
-internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Ignite }
+internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Android, Vehicle, ExplosiveBarrel, Motor, Gate, Timer, Conveyor, Piston, SlidingDoor, Ignite, Electrify }
 
 
-internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller }
+internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller, StartMotor, OpenGate, StartTimer, StartConveyor, StartPiston, ToggleDoor }
+
+internal static class SceneId
+{
+    public static string New(string prefix) => $"{prefix}_{Guid.NewGuid():N}"[..Math.Min(prefix.Length + 1 + 12, prefix.Length + 33)];
+}
+
+internal sealed class TriggerOutput
+{
+    public string TargetId = "";
+    public string TargetName = "";
+    public TriggerActionKind Action = TriggerActionKind.Explosion;
+    public float Delay;
+    public float Radius = 5.0f;
+    public float Strength = 10.0f;
+    public bool Enabled = true;
+}
+
+internal sealed class SelectedTriggerOutputSnapshot
+{
+    public int Index { get; init; }
+    public string TargetId { get; init; } = "";
+    public string TargetName { get; init; } = "";
+    public TriggerActionKind Action { get; init; }
+    public float Delay { get; init; }
+    public float Radius { get; init; }
+    public float Strength { get; init; }
+    public bool Enabled { get; init; }
+
+    public override string ToString()
+    {
+        string target = string.IsNullOrWhiteSpace(TargetName) ? (string.IsNullOrWhiteSpace(TargetId) ? "legacy target" : TargetId) : TargetName;
+        string delay = Delay > 0.01f ? $" +{Delay:0.##}s" : "";
+        string state = Enabled ? "" : " [off]";
+        return $"{Index + 1}. {Action} -> {target}{delay}{state}";
+    }
+}
 
 internal enum EditorToolMode { Select, Move, Rotate, Scale }
 
 internal sealed class SelectedTriggerSnapshot
 {
+    public string Id { get; init; } = "";
     public string Name { get; init; } = "Trigger";
     public Vector3 Position { get; init; }
     public Vector3 HalfExtents { get; init; }
@@ -28,6 +65,8 @@ internal sealed class SelectedTriggerSnapshot
     public float Strength { get; init; }
     public float CooldownSeconds { get; init; }
     public Vector3 TargetPosition { get; init; }
+    public int OutputCount { get; init; }
+    public List<SelectedTriggerOutputSnapshot> Outputs { get; init; } = [];
 }
 
 internal sealed class SelectedTriggerProperties
@@ -46,7 +85,14 @@ internal sealed class SelectedTriggerProperties
 
 internal sealed class SceneTrigger
 {
+    public string Id = SceneId.New("trigger");
     public string Name = "Trigger";
+    public string DisplayName
+    {
+        get => string.IsNullOrWhiteSpace(Name) ? Id : Name;
+        set => Name = value;
+    }
+    public readonly List<TriggerOutput> Outputs = new();
     public Vector3 Position;
     public Vector3 HalfExtents = new(0.9f, 0.08f, 0.9f);
     public TriggerActionKind Action = TriggerActionKind.Explosion;
@@ -67,11 +113,20 @@ internal sealed class SceneTrigger
     }
 }
 
+internal sealed class ScheduledTriggerOutput
+{
+    public string SourceName = "Trigger";
+    public TriggerOutput Output = new();
+    public Vector3 FallbackTargetPosition;
+    public float Remaining;
+}
+
 internal sealed class SelectedBodySnapshot
 {
     public bool IsStatic { get; init; }
     public int ChildCount { get; init; }
     public float Mass { get; init; }
+    public MaterialId MaterialId { get; init; }
     public float Density { get; init; }
     public float Friction { get; init; }
     public float Restitution { get; init; }
@@ -80,11 +135,15 @@ internal sealed class SelectedBodySnapshot
     public Vector3 Color { get; init; }
     public bool Breakable { get; init; }
     public float BreakThreshold { get; init; }
+    public float Flammability { get; init; }
+    public float Conductivity { get; init; }
+    public float ExplosivePower { get; init; }
 }
 
 internal sealed class SelectedBodyProperties
 {
     public bool IsStatic { get; init; }
+    public MaterialId MaterialId { get; init; }
     public float Density { get; init; }
     public float Friction { get; init; }
     public float Restitution { get; init; }
@@ -93,6 +152,9 @@ internal sealed class SelectedBodyProperties
     public Vector3 Color { get; init; }
     public bool Breakable { get; init; }
     public float BreakThreshold { get; init; }
+    public float Flammability { get; init; }
+    public float Conductivity { get; init; }
+    public float ExplosivePower { get; init; }
 }
 
 /// <summary>
@@ -130,6 +192,26 @@ internal sealed partial class GlPanel : Control
     public bool IsZeroGravity => _zeroG;
     public bool IsWaterOn => _waterOn;
     public bool IsSoundOn => _soundEnabled;
+    public bool ShowTriggerWiring => _showTriggerWiring;
+    public bool HasActiveChallenge => _challengeKind != ChallengeKind.None;
+    public string CurrentChallengeTitle => _challengeTitle;
+    public string CurrentChallengeGoal => _challengeGoal;
+    public string CurrentChallengeMessage => _challengeMessage;
+    public string CurrentScenarioTitle => _challengeKind != ChallengeKind.None
+        ? _challengeTitle
+        : _levelIndex >= 0 ? LevelTitle(_levelIndex) : string.Empty;
+    public string CurrentScenarioGoal => _challengeKind != ChallengeKind.None
+        ? _challengeGoal
+        : _levelIndex >= 0 ? LevelGoal(_levelIndex) : string.Empty;
+    public bool IsVerticalSliceLoaded => _verticalSliceLoaded;
+    public bool IsVerticalSliceRunning => _verticalSliceRunning;
+    public bool IsVerticalSliceFinished => _verticalSliceFinished;
+    public string VerticalSliceResultTitle => _verticalSliceResultTitle;
+    public string VerticalSliceResultDetail => _verticalSliceResultDetail;
+    public int VerticalSliceStars => _verticalSliceStars;
+    public string VerticalSliceScoreText => _challengeKind == ChallengeKind.AndroidCrashTest
+        ? $"Damage {_challengeScore}% · Time {_challengeTimer:0.0}s"
+        : string.Empty;
     public EditorToolMode ActiveEditorTool => _editorTool;
     public ActiveForceFieldKind ActiveForceField => _world.Fields.Count == 1
         ? _world.Fields[0].Type switch
@@ -157,7 +239,7 @@ internal sealed partial class GlPanel : Control
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
     private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _planeMesh = null!, _waterMesh = null!;
-    private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete;
+    private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire;
     private uint _shadowFbo, _shadowTex;
     private const int ShadowSize = 2048;
 
@@ -200,21 +282,34 @@ internal sealed partial class GlPanel : Control
     private const float MuzzleSpeed = 26f;
     private static readonly Vector3 DefaultGravity = new(0, -9.81f, 0);
 
-    // ---- effects (sparks + trails) ----
+    // ---- effects (sparks + trails + short-lived VFX beams) ----
     private struct Particle
     {
         public Vector3 Pos, Vel, Color;
         public float Life, MaxLife, Size;
         public bool Gravity;
     }
-    private readonly List<Particle> _particles = new(512);
-    private const int MaxParticles = 600;
+
+    private struct Beam
+    {
+        public Vector3 A, B, Color;
+        public float Life, MaxLife, Thickness;
+    }
+
+    private readonly List<Particle> _particles = new(1024);
+    private readonly List<Beam> _beams = new(128);
+    private const int MaxParticles = 1200;
+    private const int MaxBeams = 96;
+    private float _impactFlash;
 
     // ---- ragdolls (the 3D People Playground "toy"; see Ragdoll.cs) ----
     private readonly RagdollSystem _ragdolls = new();
 
     // ---- fire / heat (first M1 interacting system; see Heat.cs) ----
     private readonly HeatSystem _heat = new();
+
+    // ---- electricity (M1 interacting system) ----
+    private readonly ElectricitySystem _electricity = new();
 
     // ---- lightweight feedback sounds / water-entry tracking ----
     private bool _soundEnabled = false;
@@ -223,6 +318,8 @@ internal sealed partial class GlPanel : Control
 
     // ---- interactive triggers / pressure plates ----
     private readonly List<SceneTrigger> _triggers = new();
+    private readonly List<ScheduledTriggerOutput> _scheduledTriggerOutputs = new();
+    private bool _showTriggerWiring = true;
 
     private bool _waterOn;
 
@@ -239,6 +336,14 @@ internal sealed partial class GlPanel : Control
     private int _challengeStartCount;
     private int _challengeScore;
     private readonly List<RigidBody> _challengeBodies = [];
+
+    // ---- M3 vertical slice state ----
+    private bool _verticalSliceLoaded;
+    private bool _verticalSliceRunning;
+    private bool _verticalSliceFinished;
+    private string _verticalSliceResultTitle = "";
+    private string _verticalSliceResultDetail = "";
+    private int _verticalSliceStars;
 
     // ---- campaign (levels + stars + progress) ----
     private CampaignProgress _campaign = new();
@@ -323,7 +428,11 @@ internal sealed partial class GlPanel : Control
     public void SpawnPins()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.BowlingPins); Focus(); } }
     public void SpawnChain()    { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Chain); Focus(); } }
     public void SpawnRagdoll()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ragdoll); Focus(); } }
+    public void SpawnAndroid()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Android); Focus(); } }
+    public void SpawnVehicle()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Vehicle); Focus(); } }
+    public void SpawnExplosiveBarrel() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.ExplosiveBarrel); Focus(); } }
     public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
+    public void Electrify()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Electrify); Focus(); } }
     public void Shoot()         { if (_initialized) { CancelPendingSceneAction(); ShootBall(); Focus(); } }
     public void Detonate()      { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Explosion); Focus(); } }
     public void Attractor()     { if (_initialized) { ToggleOrArmField(ForceField.Kind.Attract, PendingSceneActionKind.Attractor); Focus(); } }
@@ -363,6 +472,14 @@ internal sealed partial class GlPanel : Control
         Focus();
     }
 
+    public void ToggleTriggerWiring()
+    {
+        _showTriggerWiring = !_showTriggerWiring;
+        StatusUpdated?.Invoke(_showTriggerWiring ? "Trigger wiring shown." : "Trigger wiring hidden. Selected trigger wiring remains visible.");
+        NotifyStateChanged();
+        Focus();
+    }
+
     public void ApplySelectedBodyProperties(SelectedBodyProperties props)
     {
         if (_selectedBody == null) return;
@@ -372,9 +489,13 @@ internal sealed partial class GlPanel : Control
         b.Color = Vector3.Clamp(props.Color, Vector3.Zero, Vector3.One);
         b.Friction = Math.Clamp(props.Friction, 0f, 3f);
         b.Restitution = Math.Clamp(props.Restitution, 0f, 2f);
+        b.MaterialId = props.MaterialId;
         b.Density = Math.Clamp(props.Density, 0.001f, 100f);
         b.Breakable = props.Breakable;
         b.BreakThreshold = Math.Clamp(props.BreakThreshold, 1f, 50f);
+        b.Flammability = Math.Clamp(props.Flammability, 0f, 1.5f);
+        b.Conductivity = Math.Clamp(props.Conductivity, 0f, 1.5f);
+        b.ExplosivePower = Math.Clamp(props.ExplosivePower, 0f, 5f);
         b.SetStatic(props.IsStatic);
         if (!props.IsStatic) b.RecomputeMass(b.Density);
         b.UpdateDerived();
@@ -462,8 +583,104 @@ internal sealed partial class GlPanel : Control
             CooldownSeconds = t.CooldownSeconds,
             TargetOffset = t.TargetOffset,
         };
+        foreach (var output in _selectedTrigger.Outputs)
+        {
+            copy.Outputs.Add(new TriggerOutput
+            {
+                TargetId = output.TargetId,
+                TargetName = output.TargetName,
+                Action = output.Action,
+                Delay = output.Delay,
+                Radius = output.Radius,
+                Strength = output.Strength,
+                Enabled = output.Enabled,
+            });
+        }
         _triggers.Add(copy);
         SelectTrigger(copy);
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void RemoveSelectedTriggerOutput(int index)
+    {
+        if (_selectedTrigger == null) return;
+        if (index < 0 || index >= _selectedTrigger.Outputs.Count)
+        {
+            StatusUpdated?.Invoke("Select an output in the trigger panel first.");
+            return;
+        }
+        var removed = _selectedTrigger.Outputs[index];
+        _selectedTrigger.Outputs.RemoveAt(index);
+        _selectedTrigger.Pulse = 0.45f;
+        NotifyTriggerSelectionChanged();
+        NotifyStateChanged();
+        StatusUpdated?.Invoke($"Removed trigger output: {removed.Action} -> {(string.IsNullOrWhiteSpace(removed.TargetName) ? removed.TargetId : removed.TargetName)}.");
+        Focus();
+    }
+
+    public void ClearSelectedTriggerOutputs()
+    {
+        if (_selectedTrigger == null) return;
+        int count = _selectedTrigger.Outputs.Count;
+        _selectedTrigger.Outputs.Clear();
+        _selectedTrigger.Pulse = 0.45f;
+        NotifyTriggerSelectionChanged();
+        NotifyStateChanged();
+        StatusUpdated?.Invoke(count > 0 ? $"Cleared {count} trigger output(s)." : "Trigger already has no graph outputs.");
+        Focus();
+    }
+
+    public void TestSelectedTriggerOutput(int index)
+    {
+        if (_selectedTrigger == null) return;
+        if (index < 0 || index >= _selectedTrigger.Outputs.Count)
+        {
+            StatusUpdated?.Invoke("Select an output in the trigger panel first.");
+            return;
+        }
+        var tr = _selectedTrigger;
+        var output = tr.Outputs[index];
+        if (!output.Enabled)
+        {
+            StatusUpdated?.Invoke("Selected trigger output is disabled.");
+            return;
+        }
+        var target = ResolveOutputTargetPosition(output, tr.TargetPosition);
+        ExecuteTriggerOutput(tr.Name, output, target);
+        tr.Pulse = 1.0f;
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void UpdateSelectedTriggerOutput(int index, TriggerActionKind action, float delay, float radius, float strength, bool enabled)
+    {
+        if (_selectedTrigger == null) return;
+        if (index < 0 || index >= _selectedTrigger.Outputs.Count)
+        {
+            StatusUpdated?.Invoke("Select an output in the trigger panel first.");
+            return;
+        }
+        var output = _selectedTrigger.Outputs[index];
+        output.Action = action;
+        output.Delay = Math.Clamp(delay, 0f, 30f);
+        output.Radius = Math.Clamp(radius, 0.5f, 40f);
+        output.Strength = Math.Clamp(strength, 0.1f, 80f);
+        output.Enabled = enabled;
+        if (!string.IsNullOrWhiteSpace(output.TargetId))
+        {
+            var wanted = MechanismKindForTriggerAction(action);
+            if (wanted.HasValue && TryGetMechanismKindById(output.TargetId, out var actual) && actual != wanted.Value)
+                StatusUpdated?.Invoke($"Output updated, but {action} expects {wanted.Value}; current target is {actual}.");
+            else
+                StatusUpdated?.Invoke($"Output updated: {action} -> {(string.IsNullOrWhiteSpace(output.TargetName) ? output.TargetId : output.TargetName)}.");
+        }
+        else
+        {
+            StatusUpdated?.Invoke($"Legacy output updated: {action}.");
+        }
+        _selectedTrigger.Pulse = 0.45f;
+        NotifyTriggerSelectionChanged();
         NotifyStateChanged();
         Focus();
     }
@@ -509,12 +726,22 @@ internal sealed partial class GlPanel : Control
         else if (!_paused) _world.Step(_slowMo ? dt * 0.2f : dt);
 
         float simDt = _paused ? 0f : (_slowMo ? dt * 0.2f : dt);
+        UpdateMechanisms(simDt);
         UpdateTriggers(simDt);
+        UpdateTriggerOutputs(simDt);
         SpawnEffectsFromWorld();
+        SpawnMaterialBreakEffects();
         _ragdolls.Update(simDt, _world);
         _heat.Update(simDt, _world, _ragdolls);
+        _electricity.Update(simDt, _world, _ragdolls);
+        UpdateMaterialReactions(simDt);
         SpawnFireEffects(simDt);
+        SpawnElectricityEffects(simDt);
+        SpawnAndroidDamageEffects(simDt);
+        SpawnSteamAndWetEffects(simDt);
+        SpawnAmbientSceneEffects(simDt);
         UpdateParticles(simDt);
+        UpdateBeams(simDt);
         UpdateChallenge(simDt);
 
         RenderShadowPass();
@@ -668,7 +895,7 @@ internal sealed partial class GlPanel : Control
                 UpdateAim();
                 if (!ExecutePendingSceneAction())
                 {
-                    bool bodyTool = _pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect or PendingSceneActionKind.Ignite;
+                    bool bodyTool = _pendingSceneAction is PendingSceneActionKind.Connect or PendingSceneActionKind.Spring or PendingSceneActionKind.Disconnect or PendingSceneActionKind.Ignite or PendingSceneActionKind.Electrify;
                     StatusUpdated?.Invoke(bodyTool
                         ? PendingSceneActionInstruction()
                         : $"Click a valid point on the floor or on an object to place {PendingSceneActionLabel()}. Press Esc to cancel.");
@@ -737,8 +964,9 @@ internal sealed partial class GlPanel : Control
             case 0x37: CancelPendingSceneAction(); SpawnBody(7); break;              // 7 hammer
             case 0x38: CancelPendingSceneAction(); SpawnBody(8); break;              // 8 table
             case 0x39: CancelPendingSceneAction(); SpawnBowlingPins(); break;        // 9 bowling pins
-            case 0x30: CancelPendingSceneAction(); SpawnRagdollAtAim(); break;        // 0 ragdoll
+            case 0x30: CancelPendingSceneAction(); SpawnAndroidAtAim(); break;        // 0 android dummy
             case 0x49: ArmSceneAction(PendingSceneActionKind.Ignite); break;          // I ignite (click a body)
+            case 0x44: ArmSceneAction(PendingSceneActionKind.Electrify); break;       // D electrify (click a body)
             case 0x4C: CancelPendingSceneAction(); DropChain(); break;               // L  chain
             case 0x56: CancelPendingSceneAction(); ToggleWater(); break;             // V  water
             case 0x5A: CancelPendingSceneAction(); AddField(ForceField.Kind.Attract); break; // Z
@@ -803,6 +1031,10 @@ internal sealed partial class GlPanel : Control
         _texStripes = Textures.CreateStripes();
         _texMetal = Textures.CreateMetal();
         _texConcrete = Textures.CreateConcrete();
+        _texBarrel = Textures.CreateBarrel();
+        _texAndroid = Textures.CreateAndroidPanel();
+        _texVehicle = Textures.CreateVehiclePaint();
+        _texTire = Textures.CreateTire();
 
         _cubeMesh = Mesh.CreateCube();
         _sphereMesh = Mesh.CreateSphere();
@@ -846,8 +1078,11 @@ internal sealed partial class GlPanel : Control
         _particles.Clear();
         _ragdolls.Clear();
         _heat.Clear();
+        _electricity.Clear();
         _waterTouchState.Clear();
         _triggers.Clear();
+        _scheduledTriggerOutputs.Clear();
+        ClearMechanisms();
         _world.Grabbed = null;
         _zeroG = false;
         _waterOn = false;
@@ -971,7 +1206,12 @@ internal sealed partial class GlPanel : Control
         _world.Fields.Clear();
         _world.Waters.Clear();
         _particles.Clear();
+        _ragdolls.Clear();
+        _heat.Clear();
+        _electricity.Clear();
         _triggers.Clear();
+        _scheduledTriggerOutputs.Clear();
+        ClearMechanisms();
         _world.Grabbed = null;
         _jointFirstBody = null;
         _zeroG = zeroGravity;
@@ -1010,6 +1250,51 @@ internal sealed partial class GlPanel : Control
             case "Trigger Playground":
                 BuildTriggerPlayground();
                 break;
+            case "Android Fire Lab":
+                BuildAndroidFireLab();
+                break;
+            case "Electrical Chain Lab":
+                BuildElectricalChainLab();
+                break;
+            case "Vehicle Crash Test":
+                BuildVehicleCrashTest();
+                break;
+            case "Mechanism Chain Reaction":
+                BuildMechanismChainReaction();
+                break;
+            case "Android Stress Chamber":
+                BuildAndroidStressChamber();
+                break;
+            case "Android Crash Test Chamber":
+                BuildAndroidCrashTestChamber();
+                break;
+            case "Motor Gate Timer Lab":
+                BuildMotorGateTimerLab();
+                break;
+            case "Conveyor Chain Lab":
+                BuildConveyorChainLab();
+                break;
+            case "Piston Crusher Lab":
+                BuildPistonCrusherLab();
+                break;
+            case "Explosive Domino":
+                BuildExplosiveDomino();
+                break;
+            case "Barrel Pyramid":
+                BuildBarrelPyramid();
+                break;
+            case "Electric Floor Trap":
+                BuildElectricFloorTrap();
+                break;
+            case "Burning Barricade":
+                BuildBurningBarricade();
+                break;
+            case "Wrecking Ball":
+                BuildWreckingBall();
+                break;
+            case "Ragdoll Bowling":
+                BuildRagdollBowling();
+                break;
             default:
                 ResetScene();
                 break;
@@ -1039,6 +1324,68 @@ internal sealed partial class GlPanel : Control
                 ClearChallenge();
                 break;
         }
+    }
+
+    public void LoadVerticalSlice()
+    {
+        if (!_initialized) return;
+        BuildAndroidCrashTestChamber();
+        _verticalSliceLoaded = true;
+        _verticalSliceRunning = false;
+        _verticalSliceFinished = false;
+        _verticalSliceResultTitle = "";
+        _verticalSliceResultDetail = "";
+        _verticalSliceStars = 0;
+        _paused = true;
+        StatusUpdated?.Invoke("Vertical slice loaded: Android Crash Test Chamber. Press F8 / Start Test.");
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void StartVerticalSliceTest()
+    {
+        if (!_initialized) return;
+        if (!_verticalSliceLoaded || _challengeKind != ChallengeKind.AndroidCrashTest)
+            LoadVerticalSlice();
+
+        _verticalSliceRunning = true;
+        _verticalSliceFinished = false;
+        _verticalSliceResultTitle = "";
+        _verticalSliceResultDetail = "";
+        _verticalSliceStars = 0;
+        _challengeTimer = 0f;
+        _challengeSuccess = false;
+        _challengeFailed = false;
+        _challengeMessage = "Start the chain reaction and damage the android target.";
+        _paused = false;
+        _slowMo = false;
+
+        var trigger = _triggers.FirstOrDefault(t => t.Name.Contains("start", StringComparison.OrdinalIgnoreCase));
+        if (trigger != null)
+        {
+            trigger.Enabled = true;
+            trigger.OneShot = true;
+            trigger.Cooldown = 0f;
+            trigger.WasPressed = false;
+            FireTrigger(trigger);
+        }
+
+        StatusUpdated?.Invoke("Test started: follow the chain reaction to the crash-test payoff.");
+        NotifyStateChanged();
+        Focus();
+    }
+
+    public void RetryVerticalSlice()
+    {
+        LoadVerticalSlice();
+        StartVerticalSliceTest();
+    }
+
+    public void DismissVerticalSliceResult()
+    {
+        _verticalSliceFinished = false;
+        NotifyStateChanged();
+        Focus();
     }
 
     private void StartChallenge(ChallengeKind kind, string title, string goal, Vector3 target = default, float targetRadius = 0f)
@@ -1073,6 +1420,12 @@ internal sealed partial class GlPanel : Control
         _challengeBodies.Clear();
         _levelIndex = -1;
         _shotsThisLevel = 0;
+        _verticalSliceLoaded = false;
+        _verticalSliceRunning = false;
+        _verticalSliceFinished = false;
+        _verticalSliceResultTitle = "";
+        _verticalSliceResultDetail = "";
+        _verticalSliceStars = 0;
     }
 
     private void CompleteChallenge(string message)
@@ -1081,6 +1434,7 @@ internal sealed partial class GlPanel : Control
         _challengeSuccess = true;
         _challengeMessage = "SUCCESS: " + message;
         StatusUpdated?.Invoke($"Challenge complete: {_challengeTitle} — {message}");
+        NotifyStateChanged();
 
         // campaign scoring: rate the attempt, store the best result, unlock the next level
         if (_levelIndex >= 0 && _levelIndex < LevelCatalog.Count)
@@ -1158,6 +1512,7 @@ internal sealed partial class GlPanel : Control
         _challengeFailed = true;
         _challengeMessage = "FAILED: " + message;
         StatusUpdated?.Invoke($"Challenge failed: {_challengeTitle} — {message}");
+        NotifyStateChanged();
     }
 
     private string ChallengeStatusText()
@@ -1208,7 +1563,59 @@ internal sealed partial class GlPanel : Control
                 _challengeMessage = $"Wait until light objects float and heavy objects sink: {_challengeScore}/{_challengeStartCount}.";
                 if (_challengeTimer > 8f && _challengeScore >= Math.Max(1, _challengeStartCount - 1)) CompleteChallenge("objects sorted themselves by density");
                 break;
+
+            case ChallengeKind.AndroidCrashTest:
+                UpdateAndroidCrashTestChallenge();
+                break;
         }
+    }
+
+    private void UpdateAndroidCrashTestChallenge()
+    {
+        int damage = AndroidDamagePercent();
+        _challengeScore = damage;
+        int severed = _ragdolls.All.SelectMany(r => r.Bones).Count(b => b.Severed || b.Health <= 0f);
+        _challengeMessage = $"Start the chain reaction. Damage target android: {damage}% / 65%. Severed/broken parts: {severed}.";
+
+        if (!_verticalSliceRunning) return;
+        if (damage >= 65 || severed >= 2)
+        {
+            int stars = damage >= 85 && _challengeTimer <= 18f ? 3 : damage >= 75 ? 2 : 1;
+            FinishVerticalSlice(true, stars, $"Target damaged: {damage}%. Time: {_challengeTimer:0.0}s. Broken parts: {severed}.");
+            CompleteChallenge("crash-test target destroyed");
+        }
+        else if (_challengeTimer >= 45f)
+        {
+            FinishVerticalSlice(false, 0, $"Only {damage}% damage after 45 seconds. Rework the chain or retry.");
+            FailChallenge("target survived the test window");
+        }
+    }
+
+    private int AndroidDamagePercent()
+    {
+        var bones = _ragdolls.All.SelectMany(r => r.Bones).Where(b => b.Android).ToList();
+        if (bones.Count == 0) return 0;
+        float rawDamage = bones.Average(b => 1f - b.HealthFrac);
+        float severBonus = bones.Count(b => b.Severed || b.Health <= 0f) / (float)bones.Count * 0.35f;
+        return (int)Math.Clamp((rawDamage + severBonus) * 100f, 0f, 100f);
+    }
+
+    private void FinishVerticalSlice(bool success, int stars, string detail)
+    {
+        if (_verticalSliceFinished) return;
+        _verticalSliceFinished = true;
+        _verticalSliceRunning = false;
+        _verticalSliceStars = Math.Clamp(stars, 0, 3);
+        _verticalSliceResultTitle = success ? "TEST COMPLETE" : "TEST FAILED";
+        _verticalSliceResultDetail = detail;
+        if (success)
+        {
+            _slowMo = true;
+            foreach (var rag in _ragdolls.All)
+                foreach (var bone in rag.Bones)
+                    bone.Body.Wake();
+        }
+        NotifyStateChanged();
     }
 
     private void BuildHitTargetChallenge()
@@ -1314,6 +1721,12 @@ internal sealed partial class GlPanel : Control
         body.Breakable = true;
         body.BreakThreshold = threshold;
         body.BreakPieces = pieces;
+        return body;
+    }
+
+    private static RigidBody WithMaterial(RigidBody body, MaterialId material, bool overwriteColor = true)
+    {
+        Materials.Get(material).ApplyTo(body, overwriteColor);
         return body;
     }
 
@@ -1538,6 +1951,181 @@ internal sealed partial class GlPanel : Control
         AddBody(ball, new Vector3(0.9f, 0.9f, 0.25f));
     }
 
+    private void BuildAndroidFireLab()
+    {
+        ResetToEmptyScene(water: true);
+        _ragdolls.SpawnAndroid(_world, new Vector3(-2.4f, 0f, 0f));
+        _ragdolls.SpawnAndroid(_world, new Vector3(1.4f, 0f, 1.0f));
+
+        for (int i = 0; i < 6; i++)
+        {
+            var crate = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(-4.5f + i * 0.55f, 0.45f, -2.2f), new Vector3(0.25f), density: 0.65f), threshold: 4.5f), MaterialId.Wood);
+            crate.Flammability = 1.25f;
+            AddBody(crate, crate.Color);
+        }
+
+        var hotCore = WithMaterial(RigidBody.CreateSphere(new Vector3(-3.8f, 1.0f, -2.2f), 0.32f, density: 1.0f), MaterialId.Explosive);
+        hotCore.Flammability = 1.4f;
+        hotCore.ExplosivePower = 0.35f; // low-yield hot starter core, not a full bomb
+        AddBody(hotCore, hotCore.Color);
+        _heat.Ignite(hotCore);
+
+        var waterLabel = RigidBody.CreateStaticBox(new Vector3(0f, 0.03f, 3.2f), new Vector3(2.0f, 0.03f, 0.8f));
+        waterLabel.Color = new Vector3(0.05f, 0.20f, 0.35f);
+        _world.Bodies.Add(waterLabel);
+        StatusUpdated?.Invoke("Preset: Android Fire Lab — fire spreads, water wets/extinguishes, android bones burn differently from flesh.");
+    }
+
+    private void BuildElectricalChainLab()
+    {
+        ResetToEmptyScene(water: true);
+        _ragdolls.SpawnAndroid(_world, new Vector3(3.0f, 0f, 0f));
+
+        RigidBody? first = null;
+        for (int i = 0; i < 9; i++)
+        {
+            var node = WithMaterial(RigidBody.CreateSphere(new Vector3(-5.5f + i * 0.9f, 1.15f, 0f), 0.22f, density: 3.2f), MaterialId.Metal);
+            node.Friction = 0.35f;
+            AddBody(node, node.Color);
+            first ??= node;
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            var wetCrate = WithMaterial(RigidBody.CreateBox(new Vector3(-1.2f + i * 0.55f, 2.8f, -1.3f), new Vector3(0.22f), density: 0.55f), MaterialId.Wood);
+            wetCrate.Wetness = 0.85f;
+            AddBody(wetCrate, new Vector3(0.45f, 0.65f, 0.92f));
+        }
+
+        if (first != null) _electricity.Electrify(first, 1.4f);
+        StatusUpdated?.Invoke("Preset: Electrical Chain Lab — metal and wet objects carry charge; androids take shock damage.");
+    }
+
+    private void BuildVehicleCrashTest()
+    {
+        ResetToEmptyScene();
+
+        var ramp = RigidBody.CreateStaticBox(new Vector3(-5.2f, 1.2f, 0f), new Vector3(2.7f, 0.12f, 0.9f));
+        ramp.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.23f);
+        ramp.UpdateDerived();
+        ramp.Color = new Vector3(0.38f, 0.40f, 0.45f);
+        _world.Bodies.Add(ramp);
+
+        var rig = MakeVehicle(new Vector3(-6.7f, 3.0f, 0f), 1.0f);
+        foreach (var b in rig.Bodies)
+        {
+            b.Velocity = new Vector3(7.0f, 0f, 0f);
+            _world.Bodies.Add(b);
+        }
+        foreach (var j in rig.Joints) _world.Joints.Add(j);
+
+        for (int y = 0; y < 4; y++)
+        for (int z = -2; z <= 2; z++)
+        {
+            var block = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(2.2f, 0.28f + y * 0.55f, z * 0.55f), new Vector3(0.25f), density: 1.2f), threshold: 5.2f), MaterialId.Stone);
+            AddBody(block, new Vector3(0.60f, 0.54f, 0.48f));
+        }
+
+        _ragdolls.SpawnAndroid(_world, new Vector3(4.4f, 0f, 0f));
+        StatusUpdated?.Invoke("Preset: Vehicle Crash Test — simple car rig, wheels, crash wall, android target.");
+    }
+
+    private void BuildMechanismChainReaction()
+    {
+        ResetToEmptyScene();
+
+        var ramp = RigidBody.CreateStaticBox(new Vector3(-6.0f, 1.2f, 0f), new Vector3(2.6f, 0.12f, 0.65f));
+        ramp.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.20f);
+        ramp.UpdateDerived();
+        ramp.Color = new Vector3(0.38f, 0.39f, 0.42f);
+        _world.Bodies.Add(ramp);
+
+        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-7.5f, 2.7f, 0f), 0.34f, density: 3.0f), MaterialId.Metal);
+        ball.Velocity = new Vector3(2.5f, 0f, 0f);
+        AddBody(ball, new Vector3(0.88f, 0.82f, 0.25f));
+
+        for (int i = 0; i < 14; i++)
+        {
+            var d = WithMaterial(RigidBody.CreateBox(new Vector3(-3.8f + i * 0.36f, 0.65f, 0f), new Vector3(0.06f, 0.42f, 0.22f), density: 0.55f), MaterialId.Wood);
+            d.Friction = 0.65f;
+            AddBody(d, new Vector3(0.72f, 0.45f, 0.22f));
+        }
+
+        var rig = MakeVehicle(new Vector3(3.2f, 0.9f, 0f), 0.85f);
+        foreach (var b in rig.Bodies) _world.Bodies.Add(b);
+        foreach (var j in rig.Joints) _world.Joints.Add(j);
+
+        _triggers.Add(new SceneTrigger
+        {
+            Name = "Launch explosion",
+            Position = new Vector3(1.6f, 0.08f, 0f),
+            HalfExtents = new Vector3(0.8f, 0.06f, 0.8f),
+            Action = TriggerActionKind.Explosion,
+            Radius = 4.5f,
+            Strength = 9.5f,
+            OneShot = true,
+        });
+        _triggers.Add(new SceneTrigger
+        {
+            Name = "Wind fan",
+            Position = new Vector3(-1.0f, 0.08f, 0f),
+            HalfExtents = new Vector3(0.7f, 0.06f, 0.7f),
+            Action = TriggerActionKind.Wind,
+            Radius = 4.0f,
+            Strength = 11f,
+            OneShot = false,
+        });
+        StatusUpdated?.Invoke("Preset: Mechanism Chain Reaction — ball, domino lane, trigger plates, vehicle and explosion.");
+    }
+
+    private void BuildAndroidStressChamber()
+    {
+        ResetToEmptyScene(water: true);
+
+        // A compact trailer/debug chamber for the current M1.5 loop:
+        // impact + fire + water + electricity + explosive material + android joint tearing.
+        _ragdolls.SpawnAndroid(_world, new Vector3(0.0f, 0f, 0f));
+
+        var ram = WithMaterial(RigidBody.CreateSphere(new Vector3(-6.0f, 2.2f, 0f), 0.42f, density: 4.2f), MaterialId.Metal);
+        ram.Velocity = new Vector3(8.5f, -0.2f, 0f);
+        ram.Restitution = 0.25f;
+        AddBody(ram, new Vector3(0.82f, 0.78f, 0.62f));
+
+        var hotCrate = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(-2.7f, 0.45f, -1.5f), new Vector3(0.32f), density: 0.65f), threshold: 4.2f), MaterialId.Wood);
+        hotCrate.Flammability = 1.25f;
+        AddBody(hotCrate, hotCrate.Color);
+        _heat.Ignite(hotCrate);
+
+        var explosive = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(2.2f, 0.45f, -1.1f), new Vector3(0.33f), density: 1.1f), threshold: 2.4f), MaterialId.Explosive);
+        explosive.ExplosivePower = 1.25f;
+        AddBody(explosive, explosive.Color);
+
+        for (int i = 0; i < 6; i++)
+        {
+            var conductor = WithMaterial(RigidBody.CreateSphere(new Vector3(-1.5f + i * 0.72f, 0.85f, 1.8f), 0.20f, density: 3.2f), MaterialId.Metal);
+            conductor.Friction = 0.35f;
+            AddBody(conductor, new Vector3(0.70f, 0.76f, 0.84f));
+            if (i == 0) _electricity.Electrify(conductor, 1.5f);
+        }
+
+        var waterMarker = RigidBody.CreateStaticBox(new Vector3(0f, 0.03f, 3.25f), new Vector3(2.2f, 0.03f, 0.9f));
+        waterMarker.Color = new Vector3(0.05f, 0.20f, 0.35f);
+        _world.Bodies.Add(waterMarker);
+
+        _triggers.Add(new SceneTrigger
+        {
+            Name = "Stress blast plate",
+            Position = new Vector3(1.4f, 0.08f, 0.0f),
+            HalfExtents = new Vector3(0.75f, 0.06f, 0.75f),
+            Action = TriggerActionKind.Explosion,
+            Radius = 4.0f,
+            Strength = 9.0f,
+            OneShot = true,
+        });
+
+        StatusUpdated?.Invoke("Preset: Android Stress Chamber — impact, fire, water, electricity, explosive material and joint tearing in one room.");
+    }
+
     private void BuildTriggerPlayground()
     {
         ResetToEmptyScene();
@@ -1733,12 +2321,100 @@ internal sealed partial class GlPanel : Control
         _aimValid = false;
     }
 
-    /// <summary>Drop a humanoid ragdoll at the aim point (floor under the cursor), else near origin.</summary>
+    /// <summary>Drop a legacy humanoid ragdoll at the aim point (kept for tuning/dev use).</summary>
     private void SpawnRagdollAtAim()
     {
         EvictIfFull();
         var foot = _aimValid ? _aimPoint : new Vector3(0f, 0f, 0f);
         _ragdolls.Spawn(_world, foot);
+    }
+
+    /// <summary>Drop the product-facing synthetic android dummy at the aim point.</summary>
+    private void SpawnAndroidAtAim()
+    {
+        EvictIfFull();
+        var foot = _aimValid ? _aimPoint : new Vector3(0f, 0f, 0f);
+        _ragdolls.SpawnAndroid(_world, foot);
+    }
+
+    private void SpawnVehicleAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 1.0f, 0f);
+        var vehicle = MakeVehicle(p, 1.0f);
+        foreach (var b in vehicle.Bodies) _world.Bodies.Add(b);
+        foreach (var j in vehicle.Joints) _world.Joints.Add(j);
+        StatusUpdated?.Invoke("Spawned vehicle test rig.");
+    }
+
+    private void SpawnExplosiveBarrelAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.72f, 0f);
+        var barrel = WithMaterial(MakeBreakable(RigidBody.CreateCapsule(p, 0.34f, density: 1.05f), threshold: 2.2f, pieces: 10), MaterialId.Explosive);
+        barrel.Color = new Vector3(1.0f, 1.0f, 1.0f);
+        barrel.Tag = "ExplosiveBarrel";
+        barrel.Restitution = 0.18f;
+        barrel.Friction = 0.55f;
+        barrel.ExplosivePower = MathF.Max(barrel.ExplosivePower, 1.8f);
+        barrel.Flammability = MathF.Max(barrel.Flammability, 1.0f);
+        barrel.Conductivity = MathF.Max(barrel.Conductivity, 0.35f);
+        _world.Bodies.Add(barrel);
+        StatusUpdated?.Invoke("Placed explosive barrel. It can detonate from fire, shock or heavy impact.");
+    }
+
+    private sealed class VehicleRig
+    {
+        public readonly List<RigidBody> Bodies = new(5);
+        public readonly List<Joint> Joints = new(8);
+    }
+
+    private static VehicleRig MakeVehicle(Vector3 pos, float k)
+    {
+        var rig = new VehicleRig();
+        var chassis = RigidBody.CreateCompound(pos, [
+            ChildShape.Box(new Vector3(0.95f * k, 0.22f * k, 0.42f * k)),
+            ChildShape.Box(new Vector3(0.45f * k, 0.18f * k, 0.36f * k), new Vector3(-0.10f * k, 0.32f * k, 0f)),
+        ], density: 1.1f);
+        WithMaterial(chassis, MaterialId.Synthetic);
+        chassis.Color = new Vector3(1.0f, 1.0f, 1.0f);
+        chassis.Tag = "VehicleChassis";
+        chassis.Friction = 0.55f;
+        chassis.Restitution = 0.18f;
+        chassis.Breakable = true;
+        chassis.BreakThreshold = 8.5f;
+        chassis.Flammability = 0.45f;
+        chassis.Conductivity = 0.25f;
+        rig.Bodies.Add(chassis);
+
+        Vector3[] offsets =
+        {
+            new(-0.62f * k, -0.24f * k,  0.48f * k),
+            new( 0.62f * k, -0.24f * k,  0.48f * k),
+            new(-0.62f * k, -0.24f * k, -0.48f * k),
+            new( 0.62f * k, -0.24f * k, -0.48f * k),
+        };
+        foreach (var off in offsets)
+        {
+            var wheel = RigidBody.CreateSphere(pos + off, 0.25f * k, density: 1.4f);
+            WithMaterial(wheel, MaterialId.Rubber);
+            wheel.Color = new Vector3(1.0f, 1.0f, 1.0f);
+            wheel.Tag = "VehicleWheel";
+            wheel.Friction = 1.25f;
+            wheel.Restitution = 0.35f;
+            wheel.Flammability = 0.8f;
+            wheel.Conductivity = 0.12f;
+            rig.Bodies.Add(wheel);
+            rig.Joints.Add(new Joint
+            {
+                Type = Joint.Kind.Point,
+                A = chassis,
+                B = wheel,
+                LocalA = off,
+                LocalB = Vector3.Zero,
+            });
+        }
+        return rig;
     }
 
     /// <summary>Fire a ball from the camera toward wherever the mouse is aiming.</summary>
@@ -1839,6 +2515,17 @@ internal sealed partial class GlPanel : Control
             return true;
         }
 
+        if (_pendingSceneAction == PendingSceneActionKind.Electrify)
+        {
+            var (o, dir2) = MouseRay(_lastMouseX, _lastMouseY);
+            var target = _world.RayCast(o, dir2, out _, out _);
+            if (target == null) return false;
+            _pendingSceneAction = PendingSceneActionKind.None;
+            _electricity.Electrify(target, 1.2f);
+            NotifyStateChanged();
+            return true;
+        }
+
         if (!_aimValid) return false;
 
         var action = _pendingSceneAction;
@@ -1859,6 +2546,33 @@ internal sealed partial class GlPanel : Control
                 break;
             case PendingSceneActionKind.Ragdoll:
                 SpawnRagdollAtAim();
+                break;
+            case PendingSceneActionKind.Android:
+                SpawnAndroidAtAim();
+                break;
+            case PendingSceneActionKind.Vehicle:
+                SpawnVehicleAtAim();
+                break;
+            case PendingSceneActionKind.ExplosiveBarrel:
+                SpawnExplosiveBarrelAtAim();
+                break;
+            case PendingSceneActionKind.Motor:
+                AddMotorAtAim();
+                break;
+            case PendingSceneActionKind.Gate:
+                AddGateAtAim();
+                break;
+            case PendingSceneActionKind.Timer:
+                AddTimerAtAim();
+                break;
+            case PendingSceneActionKind.Conveyor:
+                AddConveyorAtAim();
+                break;
+            case PendingSceneActionKind.Piston:
+                AddPistonAtAim();
+                break;
+            case PendingSceneActionKind.SlidingDoor:
+                AddSlidingDoorAtAim();
                 break;
             case PendingSceneActionKind.Explosion:
                 Explode();
@@ -1897,6 +2611,15 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.BowlingPins => "bowling pins",
         PendingSceneActionKind.Chain => "chain",
         PendingSceneActionKind.Ragdoll => "ragdoll",
+        PendingSceneActionKind.Android => "android dummy",
+        PendingSceneActionKind.Vehicle => "vehicle",
+        PendingSceneActionKind.ExplosiveBarrel => "explosive barrel",
+        PendingSceneActionKind.Motor => "motor hinge",
+        PendingSceneActionKind.Gate => "gate",
+        PendingSceneActionKind.Timer => "timer",
+        PendingSceneActionKind.Conveyor => "conveyor belt",
+        PendingSceneActionKind.Piston => "piston actuator",
+        PendingSceneActionKind.SlidingDoor => "sliding door",
         PendingSceneActionKind.Explosion => "explosion",
         PendingSceneActionKind.Attractor => "attractor",
         PendingSceneActionKind.Repeller => "repeller",
@@ -1905,6 +2628,7 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.Spring => "spring",
         PendingSceneActionKind.Disconnect => "disconnect",
         PendingSceneActionKind.Ignite => "ignite",
+        PendingSceneActionKind.Electrify => "electrify",
         _ => "tool",
     };
 
@@ -1914,6 +2638,7 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.Spring => "Spring: click first object, then click second object. Esc cancels.",
         PendingSceneActionKind.Disconnect => "Disconnect: click an object to remove all its links/springs. Esc cancels.",
         PendingSceneActionKind.Ignite => "Ignite: click an object to set it on fire. Esc cancels.",
+        PendingSceneActionKind.Electrify => "Electrify: click a conductive/wet object. Esc cancels.",
         _ => $"Click inside the scene to place {PendingSceneActionLabel()}. Press Esc to cancel.",
     };
 
@@ -1993,6 +2718,7 @@ internal sealed partial class GlPanel : Control
         _particles.Clear();
         _ragdolls.Clear();
         _heat.Clear();
+        _electricity.Clear();
         _waterTouchState.Clear();
         _triggers.Clear();
         ClearChallenge();
@@ -2045,64 +2771,158 @@ internal sealed partial class GlPanel : Control
         tr.Pulse = 1.0f;
         if (tr.OneShot) tr.Enabled = false;
 
-        switch (tr.Action)
+        if (tr.Outputs.Count == 0)
+        {
+            ExecuteTriggerOutput(tr.Name, new TriggerOutput
+            {
+                Action = tr.Action,
+                TargetId = "",
+                TargetName = "legacy target",
+                Delay = 0f,
+                Radius = tr.Radius,
+                Strength = tr.Strength,
+                Enabled = true,
+            }, tr.TargetPosition);
+        }
+        else
+        {
+            foreach (var output in tr.Outputs)
+            {
+                if (!output.Enabled) continue;
+                var fallback = ResolveOutputTargetPosition(output, tr.TargetPosition);
+                if (output.Delay > 0.01f)
+                {
+                    _scheduledTriggerOutputs.Add(new ScheduledTriggerOutput
+                    {
+                        SourceName = tr.Name,
+                        Output = new TriggerOutput
+                        {
+                            TargetId = output.TargetId,
+                            TargetName = output.TargetName,
+                            Action = output.Action,
+                            Delay = output.Delay,
+                            Radius = output.Radius,
+                            Strength = output.Strength,
+                            Enabled = output.Enabled,
+                        },
+                        FallbackTargetPosition = fallback,
+                        Remaining = output.Delay,
+                    });
+                }
+                else
+                {
+                    ExecuteTriggerOutput(tr.Name, output, fallback);
+                }
+            }
+            StatusUpdated?.Invoke($"Triggered: {tr.Name} -> {tr.Outputs.Count} output(s)");
+        }
+        NotifyStateChanged();
+    }
+
+    private void UpdateTriggerOutputs(float dt)
+    {
+        if (dt <= 0f || _scheduledTriggerOutputs.Count == 0) return;
+        for (int i = _scheduledTriggerOutputs.Count - 1; i >= 0; i--)
+        {
+            var scheduled = _scheduledTriggerOutputs[i];
+            scheduled.Remaining -= dt;
+            if (scheduled.Remaining > 0f)
+                continue;
+            ExecuteTriggerOutput(scheduled.SourceName, scheduled.Output, scheduled.FallbackTargetPosition);
+            _scheduledTriggerOutputs.RemoveAt(i);
+        }
+    }
+
+    private Vector3 ResolveOutputTargetPosition(TriggerOutput output, Vector3 fallback)
+        => !string.IsNullOrWhiteSpace(output.TargetId) && TryGetMechanismPositionById(output.TargetId, out var p) ? p : fallback;
+
+    private void ExecuteTriggerOutput(string sourceName, TriggerOutput output, Vector3 targetPosition)
+    {
+        float radius = output.Radius > 0 ? output.Radius : 5.0f;
+        float strength = output.Strength > 0 ? output.Strength : 10.0f;
+        switch (output.Action)
         {
             case TriggerActionKind.Explosion:
-                ApplyExplosionAt(tr.TargetPosition + new Vector3(0, 0.25f, 0), radius: tr.Radius, strength: tr.Strength);
-                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> explosion");
+                ApplyExplosionAt(targetPosition + new Vector3(0, 0.25f, 0), radius, strength);
+                StatusUpdated?.Invoke($"Triggered: {sourceName} -> explosion");
                 break;
             case TriggerActionKind.Wind:
                 _world.Fields.Clear();
-                _world.Fields.Add(new ForceField
-                {
-                    Type = ForceField.Kind.Wind,
-                    Position = tr.TargetPosition + new Vector3(0, 1.6f, 0),
-                    Radius = tr.Radius,
-                    Strength = tr.Strength,
-                    WindDir = Vector3.UnitX,
-                });
+                _world.Fields.Add(new ForceField { Type = ForceField.Kind.Wind, Position = targetPosition + new Vector3(0, 1.6f, 0), Radius = radius, Strength = strength, WindDir = Vector3.UnitX });
                 foreach (var b in _world.Bodies) b.Wake();
-                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> wind field");
+                StatusUpdated?.Invoke($"Triggered: {sourceName} -> wind field");
                 break;
             case TriggerActionKind.ToggleGravity:
                 ToggleGravity();
-                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> gravity toggled");
+                StatusUpdated?.Invoke($"Triggered: {sourceName} -> gravity toggled");
                 break;
             case TriggerActionKind.ToggleAttractor:
                 _world.Fields.Clear();
-                _world.Fields.Add(new ForceField
-                {
-                    Type = ForceField.Kind.Attract,
-                    Position = tr.TargetPosition + new Vector3(0, 1.5f, 0),
-                    Radius = tr.Radius,
-                    Strength = tr.Strength,
-                });
+                _world.Fields.Add(new ForceField { Type = ForceField.Kind.Attract, Position = targetPosition + new Vector3(0, 1.5f, 0), Radius = radius, Strength = strength });
                 foreach (var b in _world.Bodies) b.Wake();
-                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> attractor");
+                StatusUpdated?.Invoke($"Triggered: {sourceName} -> attractor");
                 break;
             case TriggerActionKind.ToggleRepeller:
                 _world.Fields.Clear();
-                _world.Fields.Add(new ForceField
-                {
-                    Type = ForceField.Kind.Repel,
-                    Position = tr.TargetPosition + new Vector3(0, 1.5f, 0),
-                    Radius = tr.Radius,
-                    Strength = tr.Strength,
-                });
+                _world.Fields.Add(new ForceField { Type = ForceField.Kind.Repel, Position = targetPosition + new Vector3(0, 1.5f, 0), Radius = radius, Strength = strength });
                 foreach (var b in _world.Bodies) b.Wake();
-                StatusUpdated?.Invoke($"Triggered: {tr.Name} -> repeller");
+                StatusUpdated?.Invoke($"Triggered: {sourceName} -> repeller");
+                break;
+            case TriggerActionKind.StartMotor:
+            case TriggerActionKind.OpenGate:
+            case TriggerActionKind.StartTimer:
+            case TriggerActionKind.StartConveyor:
+            case TriggerActionKind.StartPiston:
+            case TriggerActionKind.ToggleDoor:
+                if (!string.IsNullOrWhiteSpace(output.TargetId) && ActivateMechanismById(output.TargetId, output.Action))
+                    StatusUpdated?.Invoke($"Triggered: {sourceName} -> {output.TargetName}");
+                else
+                    ActivateNearestMechanism(MechanismKindForTriggerAction(output.Action) ?? MechanismKind.Timer, targetPosition, radius);
                 break;
         }
-        NotifyStateChanged();
     }
 
     private void ApplyExplosionAt(Vector3 center, float radius, float strength)
     {
         _world.ApplyExplosion(center, radius, strength);
+        _ragdolls.DamageInRadius(center, radius, strength * 10.0f, _world);
         SpawnExplosionFeedback(center, radius);
         PlayExplosionSound();
         foreach (var b in _world.Bodies) b.Wake();
     }
+
+    private void UpdateMaterialReactions(float dt)
+    {
+        if (dt <= 0f) return;
+
+        // Explicit material gameplay: explosive objects can detonate from heat, fire,
+        // electricity or extreme impacts. This no longer guesses from UI values.
+        List<RigidBody>? detonate = null;
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic || !b.UserObject) continue;
+            if (b.ExplosivePower <= 0f) continue;
+
+            bool hot = b.Burning || b.Temperature > 230f;
+            bool shocked = b.Charge > 0.72f;
+            bool hardHit = b.Velocity.LengthSquared() > 220f;
+            if (hot || shocked || hardHit) (detonate ??= new List<RigidBody>()).Add(b);
+        }
+
+        if (detonate == null) return;
+        foreach (var b in detonate)
+        {
+            if (!_world.Bodies.Contains(b)) continue;
+            var pos = b.Position;
+            float radius = (3.0f + b.BoundingRadius * 1.5f) * MathF.Sqrt(MathF.Max(0.25f, b.ExplosivePower));
+            float strength = (8.5f + b.Mass * 0.25f) * MathF.Max(0.5f, b.ExplosivePower);
+            _world.RemoveBody(b);
+            _world.Joints.RemoveAll(j => j.Involves(b));
+            if (_selectedBody == b) SelectBody(null);
+            ApplyExplosionAt(pos, radius, strength);
+        }
+    }
+
 
     // ---- effects ----
 
@@ -2154,6 +2974,19 @@ internal sealed partial class GlPanel : Control
                     Gravity = false,
                 });
             }
+
+            // A soft impact flash helps hard hits read even before debris spreads.
+            if (speed >= 4.5f)
+            {
+                _impactFlash = MathF.Max(_impactFlash, Math.Clamp((speed - 4.5f) * 0.05f, 0.04f, 0.26f));
+                AddParticle(
+                    point + normal * 0.03f,
+                    Vector3.Zero,
+                    new Vector3(1.00f, 0.88f, 0.55f),
+                    0.12f + MathF.Min(speed * 0.01f, 0.10f),
+                    0.16f + MathF.Min(speed * 0.012f, 0.18f),
+                    false);
+            }
         }
         if (loudestImpact >= 3.5f) PlayImpactSound(loudestImpact);
 
@@ -2175,6 +3008,133 @@ internal sealed partial class GlPanel : Control
                 Size = 0.08f,
                 Gravity = false,
             });
+        }
+    }
+
+
+    private void SpawnMaterialBreakEffects()
+    {
+        if (_world.BreakEvents.Count == 0) return;
+
+        foreach (var e in _world.BreakEvents)
+        {
+            float power = Math.Clamp(e.Speed / 10f, 0.45f, 2.2f);
+            switch (e.MaterialId)
+            {
+                case MaterialId.Wood:
+                    SpawnBreakDust(e.Position, e.Normal, new Vector3(0.50f, 0.32f, 0.16f), 10, power);
+                    SpawnBreakSplinters(e.Position, e.Normal, new Vector3(0.78f, 0.48f, 0.20f), 14, power);
+                    break;
+                case MaterialId.Glass:
+                case MaterialId.Ice:
+                    SpawnGlassBreak(e.Position, e.Normal, e.MaterialId == MaterialId.Ice, power);
+                    break;
+                case MaterialId.Stone:
+                    SpawnBreakDust(e.Position, e.Normal, new Vector3(0.45f, 0.43f, 0.39f), 20, power);
+                    SpawnBreakChunks(e.Position, e.Normal, new Vector3(0.55f, 0.54f, 0.50f), 10, power);
+                    break;
+                case MaterialId.Plastic:
+                    SpawnBreakDust(e.Position, e.Normal, new Vector3(0.90f, 0.55f, 0.25f), 8, power);
+                    SpawnBreakChunks(e.Position, e.Normal, e.Color, 10, power);
+                    break;
+                case MaterialId.Synthetic:
+                    SpawnBreakDust(e.Position, e.Normal, new Vector3(0.18f, 0.22f, 0.25f), 8, power);
+                    SpawnBreakChunks(e.Position, e.Normal, e.Color, 8, power);
+                    SpawnSyntheticSparks(e.Position, e.Normal, 18, power);
+                    break;
+                case MaterialId.Metal:
+                    SpawnSyntheticSparks(e.Position, e.Normal, 22, power);
+                    SpawnBreakChunks(e.Position, e.Normal, new Vector3(0.58f, 0.60f, 0.64f), 6, power);
+                    break;
+                case MaterialId.Explosive:
+                    SpawnExplosionFeedback(e.Position, 1.8f + power * 0.8f);
+                    SpawnBreakDust(e.Position, e.Normal, new Vector3(0.30f, 0.22f, 0.18f), 18, power);
+                    break;
+                default:
+                    SpawnBreakDust(e.Position, e.Normal, e.Color, 8, power);
+                    SpawnBreakChunks(e.Position, e.Normal, e.Color, 8, power);
+                    break;
+            }
+        }
+    }
+
+    private void SpawnBreakDust(Vector3 pos, Vector3 normal, Vector3 color, int count, float power)
+    {
+        for (int i = 0; i < count && _particles.Count < MaxParticles; i++)
+        {
+            var dir = Vector3.Normalize(normal * 0.55f + RandomUnit() * 0.95f);
+            AddParticle(
+                pos + dir * 0.04f,
+                dir * (0.35f + (float)_rng.NextDouble() * 1.35f * power),
+                Vector3.Clamp(color * (0.75f + (float)_rng.NextDouble() * 0.35f), Vector3.Zero, Vector3.One),
+                0.65f + (float)_rng.NextDouble() * 0.55f,
+                0.09f + 0.08f * power,
+                false);
+        }
+    }
+
+    private void SpawnBreakChunks(Vector3 pos, Vector3 normal, Vector3 color, int count, float power)
+    {
+        for (int i = 0; i < count && _particles.Count < MaxParticles; i++)
+        {
+            var dir = Vector3.Normalize(normal * 0.35f + RandomUnit());
+            AddParticle(
+                pos + RandomUnit() * 0.06f,
+                dir * (0.85f + (float)_rng.NextDouble() * 2.2f * power),
+                Vector3.Clamp(color * (0.85f + (float)_rng.NextDouble() * 0.30f), Vector3.Zero, Vector3.One),
+                0.45f + (float)_rng.NextDouble() * 0.35f,
+                0.045f + 0.035f * power,
+                true);
+        }
+    }
+
+    private void SpawnBreakSplinters(Vector3 pos, Vector3 normal, Vector3 color, int count, float power)
+    {
+        for (int i = 0; i < count && _beams.Count < MaxBeams; i++)
+        {
+            var dir = Vector3.Normalize(normal * 0.35f + RandomUnit());
+            float len = 0.14f + (float)_rng.NextDouble() * (0.24f + 0.10f * power);
+            var a = pos + RandomUnit() * 0.08f;
+            var b = a + dir * len;
+            AddBeam(a, b, color, 0.22f + (float)_rng.NextDouble() * 0.14f, 0.015f + 0.008f * power);
+        }
+    }
+
+    private void SpawnGlassBreak(Vector3 pos, Vector3 normal, bool ice, float power)
+    {
+        var shardColor = ice ? new Vector3(0.72f, 0.92f, 1.0f) : new Vector3(0.82f, 0.96f, 1.0f);
+        SpawnBreakDust(pos, normal, shardColor, ice ? 12 : 8, power);
+        for (int i = 0; i < 24 && _particles.Count < MaxParticles; i++)
+        {
+            var dir = Vector3.Normalize(normal * 0.25f + RandomUnit());
+            AddParticle(
+                pos + RandomUnit() * 0.04f,
+                dir * (1.2f + (float)_rng.NextDouble() * 3.4f * power),
+                shardColor,
+                0.32f + (float)_rng.NextDouble() * 0.28f,
+                0.030f + (float)_rng.NextDouble() * 0.025f,
+                true);
+        }
+        for (int i = 0; i < 10 && _beams.Count < MaxBeams; i++)
+        {
+            var dir = Vector3.Normalize(normal * 0.15f + RandomUnit());
+            var a = pos + RandomUnit() * 0.05f;
+            AddBeam(a, a + dir * (0.10f + (float)_rng.NextDouble() * 0.20f), shardColor, 0.18f, 0.010f);
+        }
+    }
+
+    private void SpawnSyntheticSparks(Vector3 pos, Vector3 normal, int count, float power)
+    {
+        for (int i = 0; i < count && _particles.Count < MaxParticles; i++)
+        {
+            var dir = Vector3.Normalize(normal * 0.30f + RandomUnit() + Vector3.UnitY * 0.15f);
+            AddParticle(
+                pos + RandomUnit() * 0.05f,
+                dir * (1.8f + (float)_rng.NextDouble() * 4.0f * power),
+                new Vector3(0.45f, 0.90f, 1.0f),
+                0.15f + (float)_rng.NextDouble() * 0.14f,
+                0.026f + (float)_rng.NextDouble() * 0.026f,
+                true);
         }
     }
 
@@ -2254,33 +3214,284 @@ internal sealed partial class GlPanel : Control
     {
         if (dt <= 0f) return;
 
-        // Lightweight visual confirmation for the HeatSystem. Without this, fire only
-        // changed body tint, which read as "not working" unless you looked closely.
+        // VFX polish pass: fire is now three layers, not just a tint:
+        //  - orange/yellow flame beads close to the body;
+        //  - darker smoke that rises slower and lives longer;
+        //  - small ember sparks, especially on android/synthetic bones.
         foreach (var b in _world.Bodies)
         {
             if (!b.Burning) continue;
 
-            int count = b.Tag is RagdollBone ? 2 : 1;
-            for (int i = 0; i < count && _particles.Count < MaxParticles; i++)
+            bool android = b.Tag is RagdollBone rb && rb.Android;
+            float scale = Math.Clamp(b.BoundingRadius, 0.18f, 1.2f);
+            int bursts = android ? 3 : (b.Tag is RagdollBone ? 2 : 1);
+
+            for (int i = 0; i < bursts && _particles.Count < MaxParticles; i++)
             {
-                if (_rng.NextDouble() > 10.0 * dt) continue;
-                var jitter = RandomUnit() * (0.08f + b.BoundingRadius * 0.12f);
-                jitter.Y = MathF.Abs(jitter.Y);
-                _particles.Add(new Particle
-                {
-                    Pos = b.Position + jitter,
-                    Vel = new Vector3(
-                        ((float)_rng.NextDouble() - 0.5f) * 0.35f,
-                        1.0f + (float)_rng.NextDouble() * 1.4f,
-                        ((float)_rng.NextDouble() - 0.5f) * 0.35f),
-                    Color = new Vector3(1.0f, 0.35f + (float)_rng.NextDouble() * 0.35f, 0.05f),
-                    Life = 0.28f + (float)_rng.NextDouble() * 0.22f,
-                    MaxLife = 0.50f,
-                    Size = 0.08f + (float)_rng.NextDouble() * 0.05f,
-                    Gravity = false,
-                });
+                if (_rng.NextDouble() > 18.0 * dt) continue;
+                var jitter = RandomUnit() * (0.10f + scale * 0.20f);
+                jitter.Y = MathF.Abs(jitter.Y) * 0.6f;
+                AddParticle(
+                    b.Position + jitter,
+                    new Vector3(
+                        ((float)_rng.NextDouble() - 0.5f) * 0.45f,
+                        1.25f + (float)_rng.NextDouble() * 1.85f,
+                        ((float)_rng.NextDouble() - 0.5f) * 0.45f),
+                    new Vector3(1.0f, 0.30f + (float)_rng.NextDouble() * 0.50f, 0.04f),
+                    0.22f + (float)_rng.NextDouble() * 0.20f,
+                    0.07f + scale * 0.035f,
+                    false);
+            }
+
+            // Smoke: slower, larger, less bright. Androids produce cooler gray/blue smoke.
+            if (_rng.NextDouble() < 7.0 * dt && _particles.Count < MaxParticles)
+            {
+                var jitter = RandomUnit() * (0.12f + scale * 0.15f);
+                jitter.Y = MathF.Abs(jitter.Y) + scale * 0.15f;
+                var smokeColor = android
+                    ? new Vector3(0.30f, 0.34f, 0.38f)
+                    : new Vector3(0.20f, 0.19f, 0.17f);
+                AddParticle(
+                    b.Position + jitter,
+                    new Vector3(
+                        ((float)_rng.NextDouble() - 0.5f) * 0.18f,
+                        0.65f + (float)_rng.NextDouble() * 0.65f,
+                        ((float)_rng.NextDouble() - 0.5f) * 0.18f),
+                    smokeColor,
+                    0.85f + (float)_rng.NextDouble() * 0.55f,
+                    0.13f + scale * 0.08f,
+                    false);
+            }
+
+            // Embers/sparks sell synthetic android burning better than generic orange fire.
+            if ((android || b.Conductivity > 0.45f) && _rng.NextDouble() < 9.0 * dt && _particles.Count < MaxParticles)
+            {
+                var dir = Vector3.Normalize(RandomUnit() + Vector3.UnitY * 0.55f);
+                AddParticle(
+                    b.Position + RandomUnit() * (0.08f + scale * 0.10f),
+                    dir * (1.5f + (float)_rng.NextDouble() * 2.5f),
+                    android ? new Vector3(0.45f, 0.90f, 1.0f) : new Vector3(1.0f, 0.85f, 0.20f),
+                    0.22f + (float)_rng.NextDouble() * 0.18f,
+                    0.035f + (float)_rng.NextDouble() * 0.025f,
+                    true);
             }
         }
+    }
+
+    private void SpawnElectricityEffects(float dt)
+    {
+        if (dt <= 0f) return;
+
+        // Sparks attached to charged bodies, especially android bones. This makes shock damage
+        // readable even when the object itself is only mildly blue-tinted.
+        foreach (var b in _world.Bodies)
+        {
+            if (b.Charge <= 0.05f) continue;
+            bool android = b.Tag is RagdollBone rb && rb.Android;
+            float chance = (android ? 22f : 9f) * dt * Math.Clamp(b.Charge, 0.25f, 1.5f);
+            if (_rng.NextDouble() < chance)
+            {
+                var dir = Vector3.Normalize(RandomUnit() + Vector3.UnitY * 0.25f);
+                AddParticle(
+                    b.Position + RandomUnit() * (0.06f + b.BoundingRadius * 0.20f),
+                    dir * (2.2f + (float)_rng.NextDouble() * 3.2f),
+                    new Vector3(0.35f, 0.85f, 1.0f),
+                    0.16f + (float)_rng.NextDouble() * 0.14f,
+                    0.035f + (float)_rng.NextDouble() * 0.025f,
+                    true);
+            }
+        }
+
+        // Short lightning rods between charged conductive/wet neighbours. It is deliberately
+        // probabilistic so the scene flickers instead of showing permanent blue sticks.
+        for (int i = 0; i < _world.Bodies.Count; i++)
+        {
+            var a = _world.Bodies[i];
+            if (a.IsStatic || a.Charge <= 0.18f) continue;
+            float ca = Math.Clamp(a.Conductivity + a.Wetness * 0.75f, 0f, 1.5f);
+            if (ca <= 0.05f) continue;
+
+            for (int j = i + 1; j < _world.Bodies.Count; j++)
+            {
+                var b = _world.Bodies[j];
+                if (b.IsStatic) continue;
+                float cb = Math.Clamp(b.Conductivity + b.Wetness * 0.75f, 0f, 1.5f);
+                if (cb <= 0.05f) continue;
+
+                float reach = 1.15f + a.BoundingRadius + b.BoundingRadius;
+                float d2 = Vector3.DistanceSquared(a.Position, b.Position);
+                if (d2 > reach * reach) continue;
+                float d = MathF.Sqrt(MathF.Max(d2, 1e-5f));
+                float falloff = 1f - d / reach;
+                if (_rng.NextDouble() > falloff * a.Charge * 3.2f * dt) continue;
+
+                SpawnElectricArc(a.Position, b.Position, falloff);
+            }
+        }
+    }
+
+    private void SpawnAndroidDamageEffects(float dt)
+    {
+        if (dt <= 0f) return;
+
+        // Synthetic android damage feedback: coolant droplets, smoke and occasional sparks.
+        // This keeps the project away from human gore while making damage readable.
+        foreach (var rag in _ragdolls.All)
+        {
+            foreach (var bone in rag.Bones)
+            {
+                if (!bone.Android) continue;
+                var b = bone.Body;
+
+                float damage = 1f - bone.HealthFrac;
+                float leak = MathF.Max(bone.Leak, damage > 0.55f ? (damage - 0.55f) * 1.4f : 0f);
+
+                if (leak > 0.05f && _rng.NextDouble() < leak * 10.0 * dt && _particles.Count < MaxParticles)
+                {
+                    AddParticle(
+                        b.Position + RandomUnit() * (0.04f + b.BoundingRadius * 0.12f),
+                        b.Velocity * 0.08f + new Vector3(
+                            ((float)_rng.NextDouble() - 0.5f) * 0.25f,
+                            -0.15f - (float)_rng.NextDouble() * 0.55f,
+                            ((float)_rng.NextDouble() - 0.5f) * 0.25f),
+                        new Vector3(0.05f, 0.72f, 0.82f),
+                        0.55f + (float)_rng.NextDouble() * 0.35f,
+                        0.035f + leak * 0.025f,
+                        true);
+                }
+
+                if ((bone.Severed || damage > 0.70f) && _rng.NextDouble() < 5.0 * dt && _particles.Count < MaxParticles)
+                {
+                    AddParticle(
+                        b.Position + RandomUnit() * (0.05f + b.BoundingRadius * 0.14f),
+                        new Vector3(
+                            ((float)_rng.NextDouble() - 0.5f) * 0.20f,
+                            0.35f + (float)_rng.NextDouble() * 0.65f,
+                            ((float)_rng.NextDouble() - 0.5f) * 0.20f),
+                        new Vector3(0.20f, 0.24f, 0.28f),
+                        0.75f + (float)_rng.NextDouble() * 0.50f,
+                        0.10f + b.BoundingRadius * 0.04f,
+                        false);
+                }
+
+                if ((bone.Severed || bone.ShockStun > 0.1f || b.Charge > 0.25f) &&
+                    _rng.NextDouble() < (bone.Severed ? 8.0 : 4.0) * dt && _particles.Count < MaxParticles)
+                {
+                    var dir = Vector3.Normalize(RandomUnit() + Vector3.UnitY * 0.25f);
+                    AddParticle(
+                        b.Position + RandomUnit() * (0.04f + b.BoundingRadius * 0.12f),
+                        dir * (1.8f + (float)_rng.NextDouble() * 3.2f),
+                        new Vector3(0.45f, 0.90f, 1.0f),
+                        0.16f + (float)_rng.NextDouble() * 0.16f,
+                        0.028f + (float)_rng.NextDouble() * 0.022f,
+                        true);
+                }
+            }
+        }
+    }
+
+    private void SpawnSteamAndWetEffects(float dt)
+    {
+        if (dt <= 0f) return;
+
+        foreach (var b in _world.Bodies)
+        {
+            if (b.Wetness <= 0.15f) continue;
+
+            // Hot/wet objects emit pale steam. This covers the satisfying case of throwing
+            // a burning or glowing android part into water.
+            if (b.Temperature > 80f && _rng.NextDouble() < (4.0 + b.Wetness * 8.0) * dt)
+            {
+                AddParticle(
+                    b.Position + Vector3.UnitY * (b.BoundingRadius * 0.35f) + RandomUnit() * (0.06f + b.BoundingRadius * 0.10f),
+                    new Vector3(
+                        ((float)_rng.NextDouble() - 0.5f) * 0.18f,
+                        0.55f + (float)_rng.NextDouble() * 0.75f,
+                        ((float)_rng.NextDouble() - 0.5f) * 0.18f),
+                    new Vector3(0.78f, 0.86f, 0.92f),
+                    0.75f + (float)_rng.NextDouble() * 0.55f,
+                    0.11f + b.BoundingRadius * 0.05f,
+                    false);
+            }
+
+            // Very subtle water droplets on moving wet objects, useful after a splash.
+            if (b.Velocity.LengthSquared() > 4f && _rng.NextDouble() < b.Wetness * 3.0 * dt)
+            {
+                AddParticle(
+                    b.Position + RandomUnit() * (0.08f + b.BoundingRadius * 0.16f),
+                    -b.Velocity * 0.10f + RandomUnit() * 0.35f,
+                    new Vector3(0.55f, 0.80f, 1.0f),
+                    0.35f + (float)_rng.NextDouble() * 0.25f,
+                    0.035f,
+                    true);
+            }
+        }
+    }
+
+    private void SpawnElectricArc(Vector3 a, Vector3 b, float power)
+    {
+        if (_beams.Count >= MaxBeams) return;
+
+        var d = b - a;
+        float len = d.Length();
+        if (len < 1e-4f) return;
+        var dir = d / len;
+        var side = Vector3.Cross(dir, Vector3.UnitY);
+        if (side.LengthSquared() < 1e-5f) side = Vector3.Cross(dir, Vector3.UnitX);
+        side = Vector3.Normalize(side);
+        var up = Vector3.Normalize(Vector3.Cross(side, dir));
+
+        // Split the arc into a few jittered rods. They are not true screen-space lightning,
+        // but in 3D motion they read much better than a single straight line.
+        Vector3 prev = a;
+        int segments = 3 + _rng.Next(3);
+        for (int k = 1; k <= segments && _beams.Count < MaxBeams; k++)
+        {
+            float t = k / (float)segments;
+            Vector3 p = Vector3.Lerp(a, b, t);
+            if (k < segments)
+                p += (side * ((float)_rng.NextDouble() - 0.5f) + up * ((float)_rng.NextDouble() - 0.5f)) * (0.10f + 0.14f * power);
+
+            AddBeam(prev, p, new Vector3(0.45f, 0.90f, 1.0f), 0.08f + 0.05f * power, 0.025f + 0.020f * power);
+            prev = p;
+        }
+
+        // Contact sparks at both ends.
+        for (int i = 0; i < 4 && _particles.Count < MaxParticles; i++)
+        {
+            var end = (i & 1) == 0 ? a : b;
+            AddParticle(end + RandomUnit() * 0.05f, RandomUnit() * (1.4f + (float)_rng.NextDouble() * 2.4f),
+                new Vector3(0.65f, 0.95f, 1.0f), 0.16f, 0.035f, true);
+        }
+    }
+
+    private void AddParticle(Vector3 pos, Vector3 vel, Vector3 color, float life, float size, bool gravity)
+    {
+        if (_particles.Count >= MaxParticles) return;
+        _particles.Add(new Particle
+        {
+            Pos = pos,
+            Vel = vel,
+            Color = color,
+            Life = life,
+            MaxLife = MathF.Max(life, 1e-4f),
+            Size = size,
+            Gravity = gravity,
+        });
+    }
+
+    private void AddBeam(Vector3 a, Vector3 b, Vector3 color, float life, float thickness)
+    {
+        if (_beams.Count >= MaxBeams) return;
+        _beams.Add(new Beam
+        {
+            A = a,
+            B = b,
+            Color = color,
+            Life = life,
+            MaxLife = MathF.Max(life, 1e-4f),
+            Thickness = thickness,
+        });
     }
 
     private void SpawnExplosionFeedback(Vector3 center, float radius)
@@ -2353,9 +3564,31 @@ internal sealed partial class GlPanel : Control
         catch { /* sound is non-critical feedback */ }
     }
 
+    private void SpawnAmbientSceneEffects(float dt)
+    {
+        if (dt <= 0f) return;
+        // Low-frequency motes give the sandbox a little life without becoming noisy.
+        if (_rng.NextDouble() < 4.0 * dt && _particles.Count < MaxParticles)
+        {
+            var pos = new Vector3(
+                ((float)_rng.NextDouble() - 0.5f) * 18f,
+                0.8f + (float)_rng.NextDouble() * 5.2f,
+                ((float)_rng.NextDouble() - 0.5f) * 18f);
+            var vel = new Vector3(
+                ((float)_rng.NextDouble() - 0.5f) * 0.12f,
+                0.08f + (float)_rng.NextDouble() * 0.16f,
+                ((float)_rng.NextDouble() - 0.5f) * 0.12f);
+            var color = _waterOn
+                ? new Vector3(0.52f, 0.68f, 0.82f)
+                : new Vector3(0.48f, 0.50f, 0.54f);
+            AddParticle(pos, vel, color, 1.4f + (float)_rng.NextDouble() * 1.5f, 0.025f + (float)_rng.NextDouble() * 0.03f, false);
+        }
+    }
+
     private void UpdateParticles(float dt)
     {
         if (dt <= 0f) return;
+        _impactFlash = MathF.Max(0f, _impactFlash - dt * 1.8f);
         for (int i = _particles.Count - 1; i >= 0; i--)
         {
             var p = _particles[i];
@@ -2364,6 +3597,18 @@ internal sealed partial class GlPanel : Control
             if (p.Gravity) p.Vel += DefaultGravity * dt;
             p.Pos += p.Vel * dt;
             _particles[i] = p;
+        }
+    }
+
+    private void UpdateBeams(float dt)
+    {
+        if (dt <= 0f) return;
+        for (int i = _beams.Count - 1; i >= 0; i--)
+        {
+            var b = _beams[i];
+            b.Life -= dt;
+            if (b.Life <= 0f) { _beams.RemoveAt(i); continue; }
+            _beams[i] = b;
         }
     }
 
@@ -2517,6 +3762,7 @@ internal sealed partial class GlPanel : Control
         return new SelectedBodySnapshot
         {
             IsStatic = b.IsStatic,
+            MaterialId = b.MaterialId,
             ChildCount = b.Children.Length,
             Mass = b.Mass,
             Density = b.Density,
@@ -2527,6 +3773,9 @@ internal sealed partial class GlPanel : Control
             Color = b.Color,
             Breakable = b.Breakable,
             BreakThreshold = b.BreakThreshold,
+            Flammability = b.Flammability,
+            Conductivity = b.Conductivity,
+            ExplosivePower = b.ExplosivePower,
         };
     }
 
@@ -2534,8 +3783,9 @@ internal sealed partial class GlPanel : Control
     {
         var tr = _selectedTrigger;
         if (tr == null) return null;
-        return new SelectedTriggerSnapshot
+        var snapshot = new SelectedTriggerSnapshot
         {
+            Id = tr.Id,
             Name = tr.Name,
             Position = tr.Position,
             HalfExtents = tr.HalfExtents,
@@ -2546,7 +3796,24 @@ internal sealed partial class GlPanel : Control
             Strength = tr.Strength,
             CooldownSeconds = tr.CooldownSeconds,
             TargetPosition = tr.TargetPosition,
+            OutputCount = tr.Outputs.Count,
         };
+        for (int i = 0; i < tr.Outputs.Count; i++)
+        {
+            var output = tr.Outputs[i];
+            snapshot.Outputs.Add(new SelectedTriggerOutputSnapshot
+            {
+                Index = i,
+                TargetId = output.TargetId,
+                TargetName = output.TargetName,
+                Action = output.Action,
+                Delay = output.Delay,
+                Radius = output.Radius,
+                Strength = output.Strength,
+                Enabled = output.Enabled,
+            });
+        }
+        return snapshot;
     }
 
     private void NotifySelectionChanged()
@@ -2793,7 +4060,10 @@ internal sealed partial class GlPanel : Control
         var (lightVP, lightDir) = LightMatrices();
 
         GL.Viewport(0, 0, _width, _height);
-        GL.ClearColor(0.07f, 0.09f, 0.12f, 1f);
+        float tScene = (float)_sw.Elapsed.TotalSeconds;
+        float ambience = 0.5f + 0.5f * MathF.Sin(tScene * 0.55f);
+        float flash = Math.Clamp(_impactFlash, 0f, 0.30f);
+        GL.ClearColor(0.07f + flash * 0.35f, 0.09f + flash * 0.20f, 0.12f + ambience * 0.02f + flash * 0.10f, 1f);
         GL.Clear(GL.COLOR_BUFFER_BIT | GL.DEPTH_BUFFER_BIT);
 
         GL.UseProgram(_mainProgram);
@@ -2811,13 +4081,13 @@ internal sealed partial class GlPanel : Control
         GL.Uniform1(_uAlbedo, 1);
         GL.Uniform1(_uAlpha, 1f);
         GL.Uniform1(_uEmissive, 0f);
-        GL.Uniform1(_uTime, (float)_sw.Elapsed.TotalSeconds);
+        GL.Uniform1(_uTime, tScene);
         GL.Uniform1(_uWaterWaveAmp, 0f);
 
         // floor
         GL.BindTexture(GL.TEXTURE_2D, _texFloor);
         GL.Uniform1(_uUvScale, 20f);
-        GL.Uniform3(_uColor, 0.62f, 0.64f, 0.68f);
+        GL.Uniform3(_uColor, 0.60f + ambience * 0.03f, 0.62f + ambience * 0.03f, 0.67f + ambience * 0.04f);
         GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(40f, 1f, 40f)));
         _planeMesh.Draw();
         GL.Uniform1(_uWaterWaveAmp, 0f);
@@ -2858,6 +4128,11 @@ internal sealed partial class GlPanel : Control
                 color = hotColor;
                 GL.Uniform1(_uEmissive, hotGlow);
             }
+            if (ElectricitySystem.TryTint(b, out var electricColor, out float electricGlow))
+            {
+                color = electricColor;
+                GL.Uniform1(_uEmissive, MathF.Max(electricGlow, 0.25f));
+            }
 
             GL.Uniform3(_uColor, color.X, color.Y, color.Z);
 
@@ -2867,6 +4142,14 @@ internal sealed partial class GlPanel : Control
                 if (b.IsStatic) GL.Uniform1(_uUvScale, 6f);
                 GL.UniformMatrix4(_uModel, ToArray(ModelMatrix(b, in child)));
                 MeshFor(child.Shape).Draw();
+                if (IsExplosiveBarrel(b) && child.Shape == ShapeType.Capsule)
+                    DrawExplosiveBarrelOverlay(b, in child);
+                else if (IsAndroidBody(b))
+                    DrawAndroidOverlay(b, in child);
+                else if (IsVehicleChassis(b))
+                    DrawVehicleChassisOverlay(b, in child);
+                else if (IsVehicleWheel(b) && child.Shape == ShapeType.Sphere)
+                    DrawVehicleWheelOverlay(b, in child);
                 if (b.IsStatic) GL.Uniform1(_uUvScale, 1f);
             }
         }
@@ -2876,7 +4159,10 @@ internal sealed partial class GlPanel : Control
         DrawFieldMarkers();
         DrawEditorGizmo();
         DrawAimMarker();
+        DrawBeams();
         DrawParticles();
+        DrawMechanisms();
+        DrawTriggerWiring();
         DrawTriggers();
         DrawChallengeMarker();
         DrawWater();
@@ -3176,6 +4462,25 @@ internal sealed partial class GlPanel : Control
         rot = RotationFromTo(Vector3.UnitY, dir);
     }
 
+    private void DrawBeams()
+    {
+        if (_beams.Count == 0) return;
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 1f);
+
+        foreach (var beam in _beams)
+        {
+            float fade = Math.Clamp(beam.Life / beam.MaxLife, 0f, 1f);
+            GL.Uniform1(_uAlpha, 0.30f + fade * 0.55f);
+            GL.Uniform3(_uColor, beam.Color.X * fade, beam.Color.Y * fade, beam.Color.Z * fade);
+            DrawRodSegment(beam.A, beam.B, beam.Thickness * (0.5f + fade));
+        }
+
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
     private void DrawParticles()
     {
         if (_particles.Count == 0) return;
@@ -3244,6 +4549,105 @@ internal sealed partial class GlPanel : Control
         _capsuleMesh.Draw();
     }
 
+    private void DrawTriggerWiring()
+    {
+        if (_triggers.Count == 0) return;
+        if (!_showTriggerWiring && _selectedTrigger == null) return;
+
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+        GL.DepthMask(0);
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0.65f);
+
+        float t = (float)_sw.Elapsed.TotalSeconds;
+        foreach (var tr in _triggers)
+        {
+            if (!_showTriggerWiring && tr != _selectedTrigger) continue;
+
+            bool selected = tr == _selectedTrigger;
+            float pulse = tr.Pulse;
+            float alpha = selected ? 0.72f : (tr.Enabled ? 0.30f : 0.12f);
+            alpha += pulse * 0.30f;
+            float thickness = selected ? 0.040f : 0.023f;
+            var a = tr.Position + new Vector3(0, 0.18f, 0);
+
+            if (tr.Outputs.Count == 0)
+            {
+                if (!TriggerActionUsesTarget(tr.Action)) continue;
+                var color = TriggerColor(tr.Action);
+                var b = tr.TargetPosition + new Vector3(0, 0.48f + 0.08f * MathF.Sin(t * 4f + tr.Position.X), 0);
+                GL.Uniform1(_uAlpha, Math.Clamp(alpha, 0.08f, 0.95f));
+                GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+                DrawRodSegment(a, b, thickness);
+                DrawTriggerTargetMarker(tr.TargetPosition, tr.Radius, color, selected, t);
+                continue;
+            }
+
+            foreach (var output in tr.Outputs)
+            {
+                if (!output.Enabled || !TriggerActionUsesTarget(output.Action)) continue;
+                var color = TriggerColor(output.Action);
+                var target = ResolveOutputTargetPosition(output, tr.TargetPosition);
+                var b = target + new Vector3(0, 0.48f + 0.08f * MathF.Sin(t * 4f + tr.Position.X), 0);
+                GL.Uniform1(_uAlpha, Math.Clamp(alpha, 0.08f, 0.95f));
+                GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+                DrawRodSegment(a, b, thickness);
+                DrawTriggerTargetMarker(target, output.Radius > 0 ? output.Radius : tr.Radius, color, selected, t);
+            }
+        }
+
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawTriggerTargetMarker(Vector3 p, float sourceRadius, Vector3 color, bool selected, float t)
+    {
+        float pulse = selected ? 1.0f + 0.08f * MathF.Sin(t * 5.0f) : 1.0f;
+        float y = 0.16f;
+        float radius = Math.Clamp(sourceRadius, 0.75f, 8.0f);
+        float alpha = selected ? 0.45f : 0.20f;
+
+        GL.Uniform1(_uAlpha, alpha);
+        GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+
+        // Target crosshair.
+        var crossA = Matrix4x4.CreateScale(0.06f * pulse, 0.035f, 0.42f * pulse)
+                   * Matrix4x4.CreateTranslation(p + new Vector3(0, y, 0));
+        GL.UniformMatrix4(_uModel, ToArray(crossA));
+        _cubeMesh.Draw();
+        var crossB = Matrix4x4.CreateScale(0.42f * pulse, 0.035f, 0.06f * pulse)
+                   * Matrix4x4.CreateTranslation(p + new Vector3(0, y, 0));
+        GL.UniformMatrix4(_uModel, ToArray(crossB));
+        _cubeMesh.Draw();
+
+        // Approximate action radius as a square frame. It is deliberately cheap and readable.
+        if (selected || _showTriggerWiring)
+        {
+            float r = radius * (selected ? 1.0f : 0.65f);
+            GL.Uniform1(_uAlpha, selected ? 0.22f : 0.10f);
+            DrawGroundSegment(p + new Vector3(-r, y, -r), p + new Vector3( r, y, -r), color, 0.018f);
+            DrawGroundSegment(p + new Vector3( r, y, -r), p + new Vector3( r, y,  r), color, 0.018f);
+            DrawGroundSegment(p + new Vector3( r, y,  r), p + new Vector3(-r, y,  r), color, 0.018f);
+            DrawGroundSegment(p + new Vector3(-r, y,  r), p + new Vector3(-r, y, -r), color, 0.018f);
+        }
+    }
+
+    private void DrawGroundSegment(Vector3 a, Vector3 b, Vector3 color, float thickness)
+    {
+        GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+        DrawRodSegment(a, b, thickness);
+    }
+
+    private static bool TriggerActionUsesTarget(TriggerActionKind action) => action switch
+    {
+        TriggerActionKind.ToggleGravity => false,
+        _ => true,
+    };
+
     private void DrawTriggers()
     {
         if (_triggers.Count == 0) return;
@@ -3294,6 +4698,12 @@ internal sealed partial class GlPanel : Control
         TriggerActionKind.ToggleGravity => new Vector3(0.70f, 0.55f, 1.00f),
         TriggerActionKind.ToggleAttractor => new Vector3(0.30f, 0.60f, 1.00f),
         TriggerActionKind.ToggleRepeller => new Vector3(1.00f, 0.40f, 0.30f),
+        TriggerActionKind.StartMotor => new Vector3(0.95f, 0.70f, 0.18f),
+        TriggerActionKind.OpenGate => new Vector3(0.40f, 1.00f, 0.45f),
+        TriggerActionKind.StartTimer => new Vector3(1.00f, 0.88f, 0.25f),
+        TriggerActionKind.StartConveyor => new Vector3(0.25f, 0.90f, 1.0f),
+        TriggerActionKind.StartPiston => new Vector3(1.00f, 0.35f, 0.28f),
+        TriggerActionKind.ToggleDoor => new Vector3(0.35f, 0.85f, 1.00f),
         _ => new Vector3(0.8f),
     };
 
@@ -3381,12 +4791,195 @@ internal sealed partial class GlPanel : Control
 
     private uint TextureFor(RigidBody b, ShapeType shape)
         => b.IsStatic ? _texConcrete
-         : shape switch
+         : IsExplosiveBarrel(b) ? _texBarrel
+         : IsAndroidBody(b) ? _texAndroid
+         : IsVehicleChassis(b) ? _texVehicle
+         : IsVehicleWheel(b) ? _texTire
+         : b.MaterialId switch
          {
-             ShapeType.Sphere => _texStripes,
-             ShapeType.Capsule => _texMetal,
-             _ => _texCrate,
+             MaterialId.Wood => _texCrate,
+             MaterialId.Metal => _texMetal,
+             MaterialId.Stone => _texConcrete,
+             MaterialId.Glass => _texStripes,
+             MaterialId.Ice => _texStripes,
+             MaterialId.Synthetic => shape == ShapeType.Capsule ? _texMetal : _texAndroid,
+             _ => shape switch
+             {
+                 ShapeType.Sphere => _texStripes,
+                 ShapeType.Capsule => _texMetal,
+                 _ => _texCrate,
+             },
          };
+
+    private static bool IsExplosiveBarrel(RigidBody b)
+        => string.Equals(b.Tag as string, "ExplosiveBarrel", StringComparison.Ordinal)
+           || (b.MaterialId == MaterialId.Explosive && b.Children.Length == 1 && b.Children[0].Shape == ShapeType.Capsule && b.ExplosivePower > 0.5f);
+
+    private static bool IsAndroidBody(RigidBody b)
+        => b.Tag is RagdollBone bone && bone.Android;
+
+    private static bool IsVehicleChassis(RigidBody b)
+        => string.Equals(b.Tag as string, "VehicleChassis", StringComparison.Ordinal);
+
+    private static bool IsVehicleWheel(RigidBody b)
+        => string.Equals(b.Tag as string, "VehicleWheel", StringComparison.Ordinal);
+
+    private void DrawAndroidOverlay(RigidBody b, in ChildShape child)
+    {
+        var localToWorld = Matrix4x4.CreateFromQuaternion(child.LocalRot)
+                         * Matrix4x4.CreateTranslation(child.LocalPos)
+                         * Matrix4x4.CreateFromQuaternion(b.Rotation)
+                         * Matrix4x4.CreateTranslation(b.Position);
+
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0.28f);
+        GL.Uniform3(_uColor, 0.26f, 0.92f, 1.00f);
+
+        if (child.Shape == ShapeType.Sphere)
+        {
+            var visor = Matrix4x4.CreateScale(child.Radius * 0.95f, child.Radius * 0.22f, child.Radius * 0.30f)
+                      * Matrix4x4.CreateTranslation(0f, 0f, child.Radius * 0.82f)
+                      * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(visor));
+            _cubeMesh.Draw();
+
+            var crown = Matrix4x4.CreateScale(child.Radius * 0.18f, child.Radius * 0.18f, child.Radius * 0.18f)
+                      * Matrix4x4.CreateTranslation(0f, child.Radius * 0.92f, 0f)
+                      * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(crown));
+            _sphereMesh.Draw();
+        }
+        else if (child.Shape == ShapeType.Box)
+        {
+            var he = child.HalfExtents;
+            // chest core / limb strips.
+            var panel = Matrix4x4.CreateScale(he.X * 0.38f, he.Y * 0.34f, he.Z * 0.10f)
+                      * Matrix4x4.CreateTranslation(0f, 0f, he.Z * 1.08f)
+                      * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(panel));
+            _cubeMesh.Draw();
+
+            if (he.Y > he.X * 1.8f)
+            {
+                var band1 = Matrix4x4.CreateScale(he.X * 0.55f, he.Y * 0.08f, he.Z * 0.08f)
+                          * Matrix4x4.CreateTranslation(0f, he.Y * 0.46f, he.Z * 1.06f)
+                          * localToWorld;
+                var band2 = Matrix4x4.CreateScale(he.X * 0.55f, he.Y * 0.08f, he.Z * 0.08f)
+                          * Matrix4x4.CreateTranslation(0f, -he.Y * 0.46f, he.Z * 1.06f)
+                          * localToWorld;
+                GL.UniformMatrix4(_uModel, ToArray(band1)); _cubeMesh.Draw();
+                GL.UniformMatrix4(_uModel, ToArray(band2)); _cubeMesh.Draw();
+            }
+        }
+
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawVehicleChassisOverlay(RigidBody b, in ChildShape child)
+    {
+        if (child.Shape != ShapeType.Box) return;
+        var localToWorld = Matrix4x4.CreateFromQuaternion(child.LocalRot)
+                         * Matrix4x4.CreateTranslation(child.LocalPos)
+                         * Matrix4x4.CreateFromQuaternion(b.Rotation)
+                         * Matrix4x4.CreateTranslation(b.Position);
+        var he = child.HalfExtents;
+
+        // windshield
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0.05f);
+        GL.Uniform3(_uColor, 0.12f, 0.16f, 0.20f);
+        if (he.Y > 0.16f)
+        {
+            var glass = Matrix4x4.CreateScale(he.X * 0.75f, he.Y * 0.32f, he.Z * 0.10f)
+                      * Matrix4x4.CreateTranslation(-he.X * 0.08f, he.Y * 0.10f, he.Z * 1.05f)
+                      * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(glass));
+            _cubeMesh.Draw();
+        }
+        else
+        {
+            // main body gets front lights
+            GL.Uniform1(_uEmissive, 0.65f);
+            GL.Uniform3(_uColor, 1.00f, 0.95f, 0.72f);
+            foreach (float sx in new[] { -he.X * 0.60f, he.X * 0.60f })
+            {
+                var light = Matrix4x4.CreateScale(he.Z * 0.18f)
+                          * Matrix4x4.CreateTranslation(sx, 0f, he.Z * 1.10f)
+                          * localToWorld;
+                GL.UniformMatrix4(_uModel, ToArray(light));
+                _sphereMesh.Draw();
+            }
+            GL.Uniform1(_uEmissive, 0f);
+        }
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawVehicleWheelOverlay(RigidBody b, in ChildShape child)
+    {
+        var localToWorld = Matrix4x4.CreateFromQuaternion(child.LocalRot)
+                         * Matrix4x4.CreateTranslation(child.LocalPos)
+                         * Matrix4x4.CreateFromQuaternion(b.Rotation)
+                         * Matrix4x4.CreateTranslation(b.Position);
+        float r = child.Radius;
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0.03f);
+        GL.Uniform3(_uColor, 0.76f, 0.78f, 0.82f);
+        foreach (float z in new[] { -r * 0.62f, r * 0.62f })
+        {
+            var hub = Matrix4x4.CreateScale(r * 0.42f, r * 0.42f, r * 0.10f)
+                    * Matrix4x4.CreateTranslation(0f, 0f, z)
+                    * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(hub));
+            _sphereMesh.Draw();
+        }
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawExplosiveBarrelOverlay(RigidBody b, in ChildShape child)
+    {
+        var localToWorld = Matrix4x4.CreateFromQuaternion(child.LocalRot)
+                         * Matrix4x4.CreateTranslation(child.LocalPos)
+                         * Matrix4x4.CreateFromQuaternion(b.Rotation)
+                         * Matrix4x4.CreateTranslation(b.Position);
+
+        float r = child.Radius;
+        float half = child.HalfHeight;
+
+        // Metal hoops to make the capsule read more like a drum.
+        GL.BindTexture(GL.TEXTURE_2D, _texMetal);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0.05f);
+        GL.Uniform3(_uColor, 0.82f, 0.84f, 0.88f);
+        foreach (float y in new[] { -half * 0.82f, 0f, half * 0.82f })
+        {
+            var m = Matrix4x4.CreateScale(r * 2.14f, 0.06f, r * 2.14f)
+                  * Matrix4x4.CreateTranslation(0f, y, 0f)
+                  * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(m));
+            _sphereMesh.Draw();
+        }
+
+        // Darkened lids on the top/bottom plus a little cap.
+        GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform3(_uColor, 0.18f, 0.18f, 0.20f);
+        foreach (float y in new[] { -(half + r * 0.45f), (half + r * 0.45f) })
+        {
+            var m = Matrix4x4.CreateScale(r * 1.72f, r * 0.22f, r * 1.72f)
+                  * Matrix4x4.CreateTranslation(0f, y, 0f)
+                  * localToWorld;
+            GL.UniformMatrix4(_uModel, ToArray(m));
+            _sphereMesh.Draw();
+        }
+
+        var cap = Matrix4x4.CreateScale(r * 0.28f, r * 0.12f, r * 0.28f)
+                * Matrix4x4.CreateTranslation(r * 0.18f, half + r * 0.58f, 0f)
+                * localToWorld;
+        GL.UniformMatrix4(_uModel, ToArray(cap));
+        _sphereMesh.Draw();
+    }
 
     /// <summary>A flat ring-ish marker on the ground showing where the mouse is aiming.</summary>
     private void DrawAimMarker()

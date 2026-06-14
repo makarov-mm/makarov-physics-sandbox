@@ -9,6 +9,11 @@ internal sealed class TriggerPropertiesPanel : Panel
     public event Action<SelectedTriggerProperties>? ApplyRequested;
     public event Action? DeleteRequested;
     public event Action? DuplicateRequested;
+    public event Action? SnapTargetRequested;
+    public event Action<int>? RemoveOutputRequested;
+    public event Action<int>? TestOutputRequested;
+    public event Action? ClearOutputsRequested;
+    public event Action<int, TriggerActionKind, float, float, float, bool>? UpdateOutputRequested;
 
     private readonly Label _title = new() { Text = "Trigger properties", Dock = DockStyle.Top, Height = 28, Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold) };
     private readonly Label _info = new() { Text = "No trigger selected.\nClick a sensor plate in the scene.", AutoSize = false, Dock = DockStyle.Top, Height = 54 };
@@ -28,6 +33,13 @@ internal sealed class TriggerPropertiesPanel : Panel
     private readonly NumericUpDown _tx = Num(-100m, 100m, 0m, 2);
     private readonly NumericUpDown _ty = Num(-10m, 30m, 0m, 2);
     private readonly NumericUpDown _tz = Num(-100m, 100m, 0m, 2);
+    private readonly ListBox _outputs = new() { Dock = DockStyle.Fill, Height = 112 };
+    private readonly Label _outputsInfo = new() { Text = "No graph outputs.", AutoSize = true };
+    private readonly ComboBox _outputAction = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150 };
+    private readonly NumericUpDown _outputDelay = Num(0m, 30m, 0m, 2);
+    private readonly NumericUpDown _outputRadius = Num(0.5m, 40m, 5m, 2);
+    private readonly NumericUpDown _outputStrength = Num(0.1m, 80m, 10m, 2);
+    private readonly CheckBox _outputEnabled = new() { Text = "Output enabled", AutoSize = true };
     private bool _hasSelection;
     private bool _updating;
 
@@ -50,6 +62,9 @@ internal sealed class TriggerPropertiesPanel : Panel
 
         _action.Items.AddRange(Enum.GetNames(typeof(TriggerActionKind)).Cast<object>().ToArray());
         _action.SelectedIndex = 0;
+        _outputAction.Items.AddRange(Enum.GetNames(typeof(TriggerActionKind)).Cast<object>().ToArray());
+        _outputAction.SelectedIndex = 0;
+        _outputs.SelectedIndexChanged += (_, _) => BindSelectedOutputEditor();
 
         AddRow(layout, "Name", _name);
         AddRow(layout, "Action", _action);
@@ -65,6 +80,33 @@ internal sealed class TriggerPropertiesPanel : Panel
         AddRow(layout, "Cooldown", _cooldown);
         AddHeader(layout, "Target position");
         AddRow(layout, "X", _tx); AddRow(layout, "Y", _ty); AddRow(layout, "Z", _tz);
+        var snap = new Button { Text = "Target nearest mechanism", Height = 30, Dock = DockStyle.Fill };
+        snap.Click += (_, _) => { if (_hasSelection) SnapTargetRequested?.Invoke(); };
+        AddControl(layout, snap);
+
+        AddHeader(layout, "Graph outputs");
+        AddControl(layout, _outputsInfo);
+        AddControl(layout, _outputs);
+        var outputButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+        var testOutput = new Button { Text = "Test", Width = 64 };
+        testOutput.Click += (_, _) => { if (_hasSelection) TestOutputRequested?.Invoke(_outputs.SelectedIndex); };
+        var removeOutput = new Button { Text = "Remove", Width = 76 };
+        removeOutput.Click += (_, _) => { if (_hasSelection) RemoveOutputRequested?.Invoke(_outputs.SelectedIndex); };
+        var clearOutputs = new Button { Text = "Clear", Width = 64 };
+        clearOutputs.Click += (_, _) => { if (_hasSelection) ClearOutputsRequested?.Invoke(); };
+        outputButtons.Controls.Add(testOutput);
+        outputButtons.Controls.Add(removeOutput);
+        outputButtons.Controls.Add(clearOutputs);
+        AddControl(layout, outputButtons);
+        AddHeader(layout, "Selected output settings");
+        AddRow(layout, "Action", _outputAction);
+        AddRow(layout, "Delay", _outputDelay);
+        AddRow(layout, "Radius", _outputRadius);
+        AddRow(layout, "Strength", _outputStrength);
+        AddControl(layout, _outputEnabled);
+        var applyOutput = new Button { Text = "Apply selected output", Height = 30, Dock = DockStyle.Fill };
+        applyOutput.Click += (_, _) => RaiseUpdateOutput();
+        AddControl(layout, applyOutput);
 
         var apply = new Button { Text = "Apply trigger", Height = 30, Dock = DockStyle.Fill };
         apply.Click += (_, _) => RaiseApply();
@@ -92,11 +134,14 @@ internal sealed class TriggerPropertiesPanel : Panel
         if (s == null)
         {
             _info.Text = "No trigger selected.\nClick a sensor plate in the scene.";
+            _outputs.Items.Clear();
+            _outputsInfo.Text = "No graph outputs.";
+            BindSelectedOutputEditor();
             SetEnabled(false);
             _updating = false;
             return;
         }
-        _info.Text = $"Selected: {s.Name} ({s.Action})";
+        _info.Text = $"Selected: {s.Name} ({s.Action}) · outputs: {s.OutputCount}";
         _name.Text = s.Name;
         _action.SelectedItem = s.Action.ToString();
         _enabled.Checked = s.Enabled;
@@ -105,8 +150,48 @@ internal sealed class TriggerPropertiesPanel : Panel
         Set(_sx, s.HalfExtents.X); Set(_sy, s.HalfExtents.Y); Set(_sz, s.HalfExtents.Z);
         Set(_radius, s.Radius); Set(_strength, s.Strength); Set(_cooldown, s.CooldownSeconds);
         Set(_tx, s.TargetPosition.X); Set(_ty, s.TargetPosition.Y); Set(_tz, s.TargetPosition.Z);
+        _outputs.Items.Clear();
+        foreach (var output in s.Outputs)
+            _outputs.Items.Add(output);
+        _outputsInfo.Text = s.Outputs.Count == 0
+            ? "Legacy mode: this trigger uses Action + Target position. Press F7 to create a graph output."
+            : $"{s.Outputs.Count} graph output(s). Select one to test/remove.";
+        if (_outputs.Items.Count > 0) _outputs.SelectedIndex = 0;
+        BindSelectedOutputEditor();
         SetEnabled(true);
         _updating = false;
+    }
+
+    private void BindSelectedOutputEditor()
+    {
+        bool wasUpdating = _updating;
+        _updating = true;
+        if (_outputs.SelectedItem is SelectedTriggerOutputSnapshot output)
+        {
+            _outputAction.SelectedItem = output.Action.ToString();
+            Set(_outputDelay, output.Delay);
+            Set(_outputRadius, output.Radius);
+            Set(_outputStrength, output.Strength);
+            _outputEnabled.Checked = output.Enabled;
+        }
+        else
+        {
+            _outputAction.SelectedIndex = Math.Max(0, _outputAction.SelectedIndex);
+            Set(_outputDelay, 0f);
+            Set(_outputRadius, 5f);
+            Set(_outputStrength, 10f);
+            _outputEnabled.Checked = true;
+        }
+        _updating = wasUpdating;
+    }
+
+    private void RaiseUpdateOutput()
+    {
+        if (!_hasSelection || _updating) return;
+        int index = _outputs.SelectedIndex;
+        if (index < 0) return;
+        Enum.TryParse<TriggerActionKind>(_outputAction.SelectedItem?.ToString(), out var action);
+        UpdateOutputRequested?.Invoke(index, action, (float)_outputDelay.Value, (float)_outputRadius.Value, (float)_outputStrength.Value, _outputEnabled.Checked);
     }
 
     private void RaiseApply()
@@ -159,6 +244,11 @@ internal sealed class TriggerPropertiesPanel : Panel
                     cb.BackColor = Color.FromArgb(26, 29, 34);
                     cb.ForeColor = Color.White;
                     cb.FlatStyle = FlatStyle.Flat;
+                    break;
+                case ListBox lb:
+                    lb.BackColor = Color.FromArgb(26, 29, 34);
+                    lb.ForeColor = Color.White;
+                    lb.BorderStyle = BorderStyle.FixedSingle;
                     break;
                 case NumericUpDown n:
                     n.BackColor = Color.FromArgb(26, 29, 34);

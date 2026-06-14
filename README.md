@@ -135,6 +135,66 @@ through clips — so camera, slow-mo and "looks good in 3D" are first-class, not
 
 ---
 
+## Using the new entities (mechanisms, triggers & wiring)
+
+This is the M1/M2 "contraption" layer. Place things from the **Scene menu**, the **toolbar**,
+or the **F6 spawn catalog**; placement tools arm a *click-to-place* mode (click in the scene).
+
+### Mechanisms (the moving parts)
+Six types — **Motor, Gate, Timer, Conveyor, Piston, Sliding Door**. After placing one,
+**select it** to rename and tune it (radius, strength, speed, delay). Each carries a stable
+`Id` + display name so triggers can target it by identity, not position.
+- **Motor** — a spinning striker that kicks bodies (tune `MotorSpeed`).
+- **Gate** — blocks a lane until opened.
+- **Timer** — waits `Delay` seconds, then fires its chain action (`Chain` re-fires linked outputs).
+- **Conveyor** — pushes bodies along its lane; can start inactive until a trigger starts it.
+- **Piston** — an animated pusher that shoves nearby bodies (tune `OpenSpeed`, `Strength`).
+- **Sliding Door** — opens/closes a barrier on command.
+
+### Triggers + outputs (the wiring / logic)
+A **trigger** (pressure plate) fires when a body presses it. Each trigger owns a list of
+**Outputs**; each output is *{target mechanism by Id, action, delay, radius, strength, enabled}*.
+So one plate can, on a single press: open a door at 0.3 s, start a conveyor at 0.7 s, fire a
+piston at 1.3 s, detonate at 3 s — a full timed chain, **no physical timer object needed**.
+- Select a trigger → **Trigger panel** → add / edit outputs.
+- **F7** / "Target nearest mechanism" snaps an output to the closest compatible mechanism by Id.
+- **Backwards compatible:** a trigger with no outputs falls back to its legacy `Action` +
+  `TargetPosition`. Old scenes still load.
+- **Wiring lines** render between triggers and their resolved targets (View → show/hide
+  wiring) so chains are readable.
+
+### Hazards (the verbs)
+- **Ignite (I)** — click a body to set it on fire; fire spreads to flammable neighbours,
+  chars them, and burns ragdoll/android bones.
+- **Electrify (D)** — click a body to inject charge; it arcs across conductive (metal) and
+  wet bodies and shocks androids.
+- **Explosion (E)**, explosive **barrels**, etc.
+
+### Materials
+Pick a material in the object panel (Wood / Metal / Glass / Stone / Foam / Ice / Plastic /
+Synthetic / Explosive). It sets density / friction / bounce / break **plus** flammability /
+conductivity / explosive power — which is what drives the interactions (metal conducts, wood
+burns, explosive detonates). Saved and loaded with the scene.
+
+### Play vs editor
+- Launch normally → **editor shell**.
+- `--play` / `--fullscreen` → **fullscreen play shell**; `--preset "Name"` loads a preset on
+  boot; `--start` shows the title overlay (`--no-start` skips it).
+- In-app: **F5** title screen, **F6** catalog, **F8** start the vertical-slice test,
+  **F11** toggle editor/play view.
+
+### Recipe: build a chain reaction
+1. Place mechanisms (e.g. Timer → Door → Piston) and a payoff (explosive barrel / android).
+2. Place a **pressure plate** (trigger).
+3. Select the plate, add **outputs** pointing at each mechanism with increasing **delays**
+   (use **F7** to snap each to the nearest mechanism).
+4. Unpause and press the plate (or let a starter ball roll onto it). Watch the chain.
+
+The **Android Crash Test Chamber** and **Piston Crusher Lab** presets are worked examples —
+open one and inspect its trigger outputs to see the pattern.
+
+---
+
 ## Roadmap
 
 - **M0 — Ragdoll feel gate** *(in progress)*: a humanoid that holds a standing pose,
@@ -162,27 +222,22 @@ through clips — so camera, slow-mo and "looks good in 3D" are first-class, not
 
 **In progress**
 - **M0 — Ragdoll** (`Ragdoll.cs`): humanoid from boxes + sphere + `Point` joints; **pose
-  muscles** (per-joint angular drives holding the spawn pose, now deliberately softer).
-  The first tuning pass made the ragdoll too rigid/heavy; this pass lowers bone density,
-  lowers bone HP, weakens upright self-righting, and reduces global muscle gain so it reacts
-  more like a crash-test dummy instead of a welded mannequin. Damage from the world
-  `Impacts` channel is still **blunt only** — capped, cooldowned, and floored, so ordinary
-  falls and dragging bruise/redden without randomly amputating. Deliberate high-energy
-  verbs now have their own lethal path: explosions call `RagdollSystem.DamageInRadius(...)`
-  and fire calls `DamageBone(...)` over time. Spawn via the toolbar **Ragdoll** button
-  (icon, click-to-place) or the **`0`** key (spawn at cursor).
+  muscles** (per-joint angular drives holding the spawn pose, now stiffer so it stays
+  together when dragged); **death** + **dismemberment**. Damage from the world `Impacts`
+  channel is now **blunt only** — capped, cooldowned, and floored, so falls and dragging
+  bruise (redden) but never tear the body apart. Severing/killing is reserved for
+  deliberate weapons via `RagdollSystem.DamageBone(..., sever-capable)`. Spawn via the
+  toolbar **Ragdoll** button (icon, click-to-place) or the **`0`** key (spawn at cursor).
 - **M1 — Fire/heat** (`Heat.cs`): per-body `Temperature` / `Burning` / `Flammability`
   (Physics.cs). Burning bodies consume fuel, radiate heat to nearby flammable bodies,
   ignite them past an ignition point, then char and burn out. Dense bodies (metal/stone)
-  resist via a density gate, but **ragdoll bones bypass that density gate** because their
-  high physics density is only there for solver stability. Fire now lasts long enough to
-  read visually, damages burning ragdoll bones over time, and has simple rising flame
-  particles in `Core.cs` so the ignite tool has immediate feedback. Igniter tool: toolbar
-  **Ignite** button (torch icon) / **`I`** key → click a body.
+  resist via a density gate. **Fire damages burning ragdoll bones over time** (sever-capable)
+  — so a fire spreads bone-to-bone, cooks a vital part, and collapses the body, all
+  emergent. Igniter tool: toolbar **Ignite** button (torch icon) / **`I`** key → click a
+  body. Burning bodies glow and flicker; charred ones darken.
 
 **Next**
-- Build and run locally, then do a hands-on feel pass: tune `BoneDensity`, muscle gain,
-  blunt impact threshold, fire damage and fuel until one ragdoll is fun for five minutes.
+- Tune both feels (muscle gains, damage curve, fire spread/ignition rates).
 - Add the rest of M1: **electricity** (conductivity over the contact/connection graph) and
   a **blade** verb (sever-capable on contact). Wire per-material `Flammability`/conductivity
   into the material-preset table + properties panel + `.mpscene` serialization (currently
@@ -232,11 +287,18 @@ through clips — so camera, slow-mo and "looks good in 3D" are first-class, not
 
 ## Changelog
 
-- **(pass 4)** *Ragdoll/fire tuning pass*: ragdoll is less welded and less massive
-  (`BoneDensity` down, muscle/upright gains down, per-bone HP down); explosions now apply
-  explicit sever-capable radial damage to ragdoll bones; fire no longer gets suppressed by
-  the ragdoll density gate, burns longer, deals meaningful per-bone damage, and spawns
-  visible flame particles so the Ignite tool reads immediately.
+- **2026-06-14 — Cleanup + preset pack**
+  - *Cleanup:* removed 10 duplicate loose `*.png` from the project root (the build only ships
+    `icons\*.png`, which already holds every icon) and the IDE-local `*.sln.DotSettings` /
+    `*.csproj.user`. Removed a dead no-op write in the scheduled-trigger-output queue.
+  - *New presets* (in `PresetsExtra.cs`, built only on existing systems — no new entity types):
+    **Explosive Domino** (fire → explosive chain), **Barrel Pyramid** (impact → explosive
+    chain), **Electric Floor Trap** (current × wet × metal × android), **Burning Barricade**
+    (fire spreads crate-to-crate to androids), **Wrecking Ball** (Distance-joint pendulum into
+    a brick tower), **Ragdoll Bowling** (heavy ball into a pin/android triangle).
+  - *Docs:* added the "Using the new entities" guide above.
+
+
 - **(pass 3)** *Direction refined* (no code change): positioned as a **3D chaos /
   contraption / destruction sandbox** standing beside People Playground, not a gore clone;
   documented the core loop, the editor-vs-release split detail, and the vertical-slice

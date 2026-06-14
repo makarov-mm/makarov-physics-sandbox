@@ -55,8 +55,12 @@ internal sealed class RagdollBone
     public float Temperature = 20f;   // °C, for the fire/heat milestone
     public bool Burning;              // fire milestone
     public float Charge;              // electricity milestone
+    public bool Android;             // synthetic crash-test dummy skin/render/material pass
+    public float Leak;                // 0..1 synthetic coolant leak intensity for VFX/gameplay
+    public float ShockStun;           // 0..1 short stun/flicker state after electricity damage
 
     public float HealthFrac => MaxHealth > 0f ? Math.Clamp(Health / MaxHealth, 0f, 1f) : 0f;
+    public bool Broken => Severed || Health <= 0f;
 }
 
 /// <summary>An angular drive across one parent->child joint that pulls the child back to
@@ -70,6 +74,7 @@ internal struct PoseMuscle
     public Quaternion RestRelative;   // target child-in-parent rotation, captured at spawn
     public float Stiffness;           // how fast it converges (1/seconds-ish)
     public float Strength;            // proportional gain on the orientation error
+    public float BreakForce;          // relative-motion threshold before this joint can tear
 }
 
 internal sealed class Ragdoll
@@ -116,6 +121,13 @@ internal sealed class RagdollSystem
     private const float MuscleStiffnessScale = 0.9f; // global convergence multiplier (holds pose when dragged)
     private const float MuscleStrengthScale = 0.8f;  // global proportional-gain multiplier
 
+    // Android damage gameplay: joints are not just decorative rods. Hurt, burning or shocked
+    // limbs become easier to detach, which gives the sandbox the expected crash-test feel.
+    private const float JointBreakSpeed = 8.0f;       // relative speed before a healthy joint tears
+    private const float JointDamagePerSpeed = 18f;    // sever-capable hp damage past the tear limit
+    private const float BurnJointWeakening = 0.35f;   // burning limbs tear easier
+    private const float ShockJointWeakening = 0.45f;  // charged limbs tear easier
+
     // Bones are tiny in volume; at density 1 a whole body would weigh less than a single
     // steel shot (density 4) and get launched by one pellet. This makes a humanoid weigh
     // a handful of units, so hits knock it around believably instead of into orbit.
@@ -147,6 +159,8 @@ internal sealed class RagdollSystem
             {
                 if (bone.HitFlash > 0f) bone.HitFlash = MathF.Max(0f, bone.HitFlash - dt * 3.0f);
                 if (bone.HitCooldown > 0f) bone.HitCooldown = MathF.Max(0f, bone.HitCooldown - dt);
+                if (bone.Leak > 0f) bone.Leak = MathF.Max(0f, bone.Leak - dt * 0.18f);
+                if (bone.ShockStun > 0f) bone.ShockStun = MathF.Max(0f, bone.ShockStun - dt * 1.6f);
             }
 
             if (!rag.Alive) continue; // dead = limp, muscles off
@@ -159,6 +173,10 @@ internal sealed class RagdollSystem
             //    This is the cheap stand-in for real balance; it is intentionally weak.
             if (Ragdoll.UprightStrength > 0f)
                 DriveUpright(rag.Pelvis.Body, dt);
+
+            // 5) Gameplay joint tearing. A healthy android survives normal bumps, but a damaged,
+            //    burning or shocked limb can detach under sudden relative motion.
+            EvaluateJointStress(rag, dt, world);
         }
     }
 
@@ -201,6 +219,11 @@ internal sealed class RagdollSystem
         bone.Health = MathF.Max(BluntHealthFloor, bone.Health - amount);
         bone.HitFlash = 1f;
         bone.HitCooldown = HitCooldown;
+        if (bone.Android)
+        {
+            bone.Leak = MathF.Max(bone.Leak, Math.Clamp(amount / 42f, 0.06f, 0.45f));
+            bone.Body.Temperature = MathF.Max(bone.Body.Temperature, 35f + amount * 1.8f);
+        }
         bone.Body.Wake();
     }
 
@@ -212,6 +235,12 @@ internal sealed class RagdollSystem
 
         bone.Health -= amount;
         bone.HitFlash = 1f;
+        if (bone.Android)
+        {
+            bone.Leak = MathF.Max(bone.Leak, Math.Clamp(amount / MathF.Max(1f, bone.MaxHealth), 0.08f, 1.0f));
+            bone.ShockStun = MathF.Max(bone.ShockStun, Math.Clamp(bone.Body.Charge, 0f, 1f));
+            bone.Body.Temperature = MathF.Max(bone.Body.Temperature, 45f + amount * 2.2f);
+        }
         bone.Body.Wake();
 
         if (bone.Health <= 0f)
@@ -262,6 +291,35 @@ internal sealed class RagdollSystem
     }
 
     // ------------------------------------------------------------------ muscles
+
+    private void EvaluateJointStress(Ragdoll rag, float dt, PhysicsWorld world)
+    {
+        if (dt <= 0f || rag.Muscles.Count == 0) return;
+
+        // Iterate backwards because DamageBone can sever and remove muscles.
+        for (int i = rag.Muscles.Count - 1; i >= 0; i--)
+        {
+            var m = rag.Muscles[i];
+            var bone = m.ChildBone;
+            if (bone.Severed) continue;
+
+            float relV = (m.Child.Velocity - m.Parent.Velocity).Length();
+            float relW = (m.Child.AngularVelocity - m.Parent.AngularVelocity).Length() * 0.16f;
+            float stress = relV + relW;
+
+            float damageWeak = 1f - bone.HealthFrac;
+            float burnWeak = (bone.Burning || bone.Body.Burning || bone.Body.Temperature > 180f) ? BurnJointWeakening : 0f;
+            float shockWeak = Math.Clamp(MathF.Max(bone.Charge, bone.Body.Charge), 0f, 1f) * ShockJointWeakening;
+            float leakWeak = Math.Clamp(bone.Leak, 0f, 1f) * 0.20f;
+
+            float weakening = Math.Clamp(damageWeak * 0.55f + burnWeak + shockWeak + leakWeak, 0f, 0.82f);
+            float limit = MathF.Max(2.2f, (JointBreakSpeed + m.BreakForce * 0.18f) * (1f - weakening));
+            if (stress <= limit) continue;
+
+            float dmg = (stress - limit) * JointDamagePerSpeed * Math.Clamp(dt * 60f, 0.35f, 1.35f);
+            DamageBone(bone, dmg, world);
+        }
+    }
 
     private static void DriveMuscle(in PoseMuscle m, float dt)
     {
@@ -332,11 +390,24 @@ internal sealed class RagdollSystem
 
         float h = bone.HealthFrac;
         // Healthy skin -> deepening red as it is hurt.
-        var skin = new Vector3(0.86f, 0.66f, 0.56f);
-        var hurt = new Vector3(0.55f, 0.10f, 0.09f);
-        color = Vector3.Lerp(hurt, skin, h);
+        if (bone.Android)
+        {
+            var shell = bone.Vital ? new Vector3(0.70f, 0.75f, 0.80f) : new Vector3(0.52f, 0.58f, 0.65f);
+            var damaged = new Vector3(0.12f, 0.18f, 0.24f);
+            var leaking = new Vector3(0.10f, 0.55f, 0.62f);
+            color = Vector3.Lerp(damaged, shell, h);
+            if (bone.Leak > 0.05f) color = Vector3.Lerp(color, leaking, Math.Clamp(bone.Leak * 0.35f, 0f, 0.45f));
+            if (bone.Severed) color *= new Vector3(0.75f, 0.82f, 0.88f);
+            emissive = bone.HitFlash * 0.35f + Math.Clamp(bone.Charge, 0f, 1f) * 0.85f + bone.ShockStun * 0.35f;
+        }
+        else
+        {
+            var skin = new Vector3(0.86f, 0.66f, 0.56f);
+            var hurt = new Vector3(0.55f, 0.10f, 0.09f);
+            color = Vector3.Lerp(hurt, skin, h);
+            emissive = bone.HitFlash * 0.5f;
+        }
         if (!bone.Owner.Alive) color *= 0.7f;            // limp body reads as duller
-        emissive = bone.HitFlash * 0.5f;
         return true;
     }
 
@@ -344,6 +415,23 @@ internal sealed class RagdollSystem
 
     /// <summary>Build a humanoid standing with its feet near <paramref name="footPos"/> and
     /// add it (bodies + joints) to the world.</summary>
+    public Ragdoll SpawnAndroid(PhysicsWorld world, Vector3 footPos)
+    {
+        var rag = Spawn(world, footPos);
+        foreach (var bone in rag.Bones)
+        {
+            bone.Android = true;
+            bone.Body.Color = bone.Vital ? new Vector3(0.72f, 0.76f, 0.80f) : new Vector3(0.55f, 0.60f, 0.66f);
+            bone.Body.MaterialId = MaterialId.Synthetic;
+            bone.Body.Flammability = 0.28f;     // synthetic outer shell burns, but not like flesh
+            bone.Body.Conductivity = 0.82f;     // androids are vulnerable to electricity
+            bone.Body.ExplosivePower = 0.0f;
+            bone.Body.Restitution = 0.08f;
+            bone.Body.Friction = 0.75f;
+        }
+        return rag;
+    }
+
     public Ragdoll Spawn(PhysicsWorld world, Vector3 footPos)
     {
         var rag = new Ragdoll();
@@ -408,6 +496,7 @@ internal sealed class RagdollSystem
         body.Restitution = 0.05f;
         body.Breakable = false;      // bones are severed by health, not fractured into debris
         body.UserObject = true;      // still selectable / grabbable in the editor
+        body.MaterialId = MaterialId.Synthetic;
         body.Flammability = 1.0f;    // flesh burns readily (fire -> bone damage; see HeatSystem)
 
         var bone = new RagdollBone { Body = body, Name = name, Owner = rag, MaxHealth = hp, Health = hp, Vital = vital };
@@ -443,6 +532,7 @@ internal sealed class RagdollSystem
             RestRelative = Quaternion.Normalize(rest),
             Stiffness = stiffness,
             Strength = strength,
+            BreakForce = stiffness + strength,
         });
     }
 }

@@ -6,21 +6,6 @@ namespace MakarovPhysicsSandbox;
 
 internal sealed class ObjectPropertiesPanel : Panel
 {
-    private sealed record MaterialPreset(string Name, float Density, float Friction, float Bounciness, Vector3 Color, bool Breakable, float BreakForce);
-
-    private static readonly MaterialPreset[] Materials =
-    {
-        new("Custom", 1.0f, 0.50f, 0.30f, new Vector3(0.80f, 0.80f, 0.80f), false, 7.5f),
-        new("Wood", 0.65f, 0.55f, 0.22f, new Vector3(0.55f, 0.32f, 0.14f), true, 6.5f),
-        new("Metal", 3.20f, 0.42f, 0.12f, new Vector3(0.62f, 0.64f, 0.68f), false, 12.0f),
-        new("Rubber", 1.10f, 1.25f, 0.95f, new Vector3(0.08f, 0.08f, 0.10f), false, 12.0f),
-        new("Glass", 1.20f, 0.18f, 0.18f, new Vector3(0.70f, 0.92f, 1.00f), true, 3.2f),
-        new("Stone", 2.60f, 0.85f, 0.08f, new Vector3(0.48f, 0.48f, 0.46f), true, 10.0f),
-        new("Foam", 0.25f, 0.75f, 0.35f, new Vector3(0.95f, 0.88f, 0.45f), false, 5.0f),
-        new("Ice", 0.92f, 0.03f, 0.04f, new Vector3(0.72f, 0.90f, 1.00f), true, 5.0f),
-        new("Plastic", 0.80f, 0.35f, 0.45f, new Vector3(0.95f, 0.55f, 0.22f), false, 8.0f),
-    };
-
     public event Action<SelectedBodyProperties>? ApplyRequested;
     public event Action<float>? ScaleRequested;
     public event Action? DeleteRequested;
@@ -32,6 +17,9 @@ internal sealed class ObjectPropertiesPanel : Panel
     private readonly CheckBox _static = new() { Text = "Static / frozen", AutoSize = true };
     private readonly CheckBox _breakable = new() { Text = "Breakable", AutoSize = true };
     private readonly NumericUpDown _breakThreshold = Num(1m, 50m, 7.5m, 1);
+    private readonly NumericUpDown _flammability = Num(0m, 1.5m, 0.7m, 2);
+    private readonly NumericUpDown _conductivity = Num(0m, 1.5m, 0.05m, 2);
+    private readonly NumericUpDown _explosivePower = Num(0m, 5m, 0m, 2);
     private readonly NumericUpDown _density = Num(0.001m, 100m, 1m, 3);
     private readonly NumericUpDown _friction = Num(0m, 3m, 0.5m, 2);
     private readonly NumericUpDown _bounce = Num(0m, 2m, 0.3m, 2);
@@ -68,7 +56,7 @@ internal sealed class ObjectPropertiesPanel : Panel
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 43));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 57));
 
-        _material.Items.AddRange(Materials.Select(m => m.Name).Cast<object>().ToArray());
+        _material.Items.AddRange(Materials.All.Select(m => m.DisplayName).Cast<object>().ToArray());
         _material.SelectedIndex = 0;
         _material.SelectedIndexChanged += (_, _) => ApplyMaterialPresetFromCombo();
         AddRow(layout, "Material", _material);
@@ -85,6 +73,9 @@ internal sealed class ObjectPropertiesPanel : Panel
         AddControl(layout, _static);
         AddControl(layout, _breakable);
         AddRow(layout, "Break force", _breakThreshold);
+        AddRow(layout, "Flammable", _flammability);
+        AddRow(layout, "Conductive", _conductivity);
+        AddRow(layout, "Explosive", _explosivePower);
 
         var apply = new Button { Text = "Apply", Height = 30, Dock = DockStyle.Fill };
         apply.Click += (_, _) => RaiseApply();
@@ -125,10 +116,13 @@ internal sealed class ObjectPropertiesPanel : Panel
         }
 
         _info.Text = $"Selected: {s.ChildCount} shape(s), mass {s.Mass:0.###}";
-        _material.SelectedIndex = GuessMaterialIndex(s);
+        _material.SelectedIndex = Math.Clamp((int)s.MaterialId, 0, _material.Items.Count - 1);
         _static.Checked = s.IsStatic;
         _breakable.Checked = s.Breakable;
         Set(_breakThreshold, s.BreakThreshold);
+        Set(_flammability, s.Flammability);
+        Set(_conductivity, s.Conductivity);
+        Set(_explosivePower, s.ExplosivePower);
         Set(_density, s.Density); Set(_friction, s.Friction); Set(_bounce, s.Restitution);
         Set(_px, s.Position.X); Set(_py, s.Position.Y); Set(_pz, s.Position.Z);
         Set(_vx, s.Velocity.X); Set(_vy, s.Velocity.Y); Set(_vz, s.Velocity.Z);
@@ -141,33 +135,19 @@ internal sealed class ObjectPropertiesPanel : Panel
     {
         if (_updating || !_hasSelection) return;
         int index = _material.SelectedIndex;
-        if (index <= 0 || index >= Materials.Length) return; // Custom does not overwrite values.
+        if (index <= 0 || index >= Materials.All.Length) return; // Custom does not overwrite values.
 
-        var m = Materials[index];
+        var m = Materials.All[index];
         Set(_density, m.Density);
         Set(_friction, m.Friction);
-        Set(_bounce, m.Bounciness);
+        Set(_bounce, m.Restitution);
         Set(_cr, m.Color.X); Set(_cg, m.Color.Y); Set(_cb, m.Color.Z);
         _breakable.Checked = m.Breakable;
-        Set(_breakThreshold, m.BreakForce);
+        Set(_breakThreshold, m.BreakThreshold);
+        Set(_flammability, m.Flammability);
+        Set(_conductivity, m.Conductivity);
+        Set(_explosivePower, m.ExplosivePower);
     }
-
-    private static int GuessMaterialIndex(SelectedBodySnapshot s)
-    {
-        // Best-effort only: the scene stores actual physical values, not a hard material id.
-        for (int i = 1; i < Materials.Length; i++)
-        {
-            var m = Materials[i];
-            if (Close(s.Density, m.Density, 0.04f) &&
-                Close(s.Friction, m.Friction, 0.07f) &&
-                Close(s.Restitution, m.Bounciness, 0.07f) &&
-                s.Breakable == m.Breakable)
-                return i;
-        }
-        return 0;
-    }
-
-    private static bool Close(float a, float b, float eps) => MathF.Abs(a - b) <= eps;
 
     private void RaiseApply()
     {
@@ -175,6 +155,7 @@ internal sealed class ObjectPropertiesPanel : Panel
         ApplyRequested?.Invoke(new SelectedBodyProperties
         {
             IsStatic = _static.Checked,
+            MaterialId = _material.SelectedIndex >= 0 && _material.SelectedIndex < Materials.All.Length ? Materials.All[_material.SelectedIndex].Id : MaterialId.Custom,
             Density = (float)_density.Value,
             Friction = (float)_friction.Value,
             Restitution = (float)_bounce.Value,
@@ -183,6 +164,9 @@ internal sealed class ObjectPropertiesPanel : Panel
             Color = new Vector3((float)_cr.Value, (float)_cg.Value, (float)_cb.Value),
             Breakable = _breakable.Checked,
             BreakThreshold = (float)_breakThreshold.Value,
+            Flammability = (float)_flammability.Value,
+            Conductivity = (float)_conductivity.Value,
+            ExplosivePower = (float)_explosivePower.Value,
         });
     }
 

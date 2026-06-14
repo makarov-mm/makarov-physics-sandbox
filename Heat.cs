@@ -51,7 +51,7 @@ internal sealed class HeatSystem
             return Math.Clamp(b.Flammability, 0f, 1.5f);
 
         float densityGate = b.Density >= DensityFireproof ? 0.12f : 1f;
-        return b.Flammability * densityGate;
+        return b.Flammability * densityGate * (1f - 0.85f * Math.Clamp(b.Wetness, 0f, 1f));
     }
 
     /// <summary>Light a body on fire directly (the igniter tool, or future incendiary effects).</summary>
@@ -84,6 +84,12 @@ internal sealed class HeatSystem
         {
             if (b.Burning)
             {
+                if (b.Wetness > 0.55f)
+                {
+                    Extinguish(b);
+                    continue;
+                }
+
                 b.Temperature = MathF.Max(b.Temperature, BurnTemperature * 0.85f);
 
                 float fuel = _fuel.TryGetValue(b, out var f) ? f : BaseFuel;
@@ -128,6 +134,15 @@ internal sealed class HeatSystem
 
         if (toIgnite != null)
             foreach (var b in toIgnite) Ignite(b);
+    }
+
+    private void Extinguish(RigidBody b)
+    {
+        b.Burning = false;
+        if (b.Tag is RagdollBone bone) bone.Burning = false;
+        b.Temperature = MathF.Min(b.Temperature, 90f);
+        _fuel.Remove(b);
+        b.Wake();
     }
 
     private void BurnOut(RigidBody b)

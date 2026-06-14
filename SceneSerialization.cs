@@ -60,6 +60,7 @@ internal sealed partial class GlPanel
             Fields = _world.Fields.Select(SceneForceFieldDto.FromField).ToList(),
             Waters = _world.Waters.Select(SceneWaterDto.FromWater).ToList(),
             Triggers = _triggers.Select(SceneTriggerDto.FromTrigger).ToList(),
+            Mechanisms = CreateMechanismDtos(),
         };
 
         var json = JsonSerializer.Serialize(dto, SceneJsonOptions);
@@ -151,9 +152,12 @@ internal sealed partial class GlPanel
         foreach (var triggerDto in dto.Triggers ?? [])
         {
             if (!Enum.TryParse<TriggerActionKind>(triggerDto.Action, out var action)) action = TriggerActionKind.Explosion;
-            _triggers.Add(new SceneTrigger
+            var trigger = new SceneTrigger
             {
-                Name = string.IsNullOrWhiteSpace(triggerDto.Name) ? "Trigger" : triggerDto.Name,
+                Id = string.IsNullOrWhiteSpace(triggerDto.Id) ? SceneId.New("trigger") : triggerDto.Id,
+                Name = string.IsNullOrWhiteSpace(triggerDto.DisplayName)
+                    ? string.IsNullOrWhiteSpace(triggerDto.Name) ? "Trigger" : triggerDto.Name
+                    : triggerDto.DisplayName,
                 Position = triggerDto.Position.ToVector3(),
                 HalfExtents = triggerDto.HalfExtents.ToVector3(),
                 Action = action,
@@ -163,8 +167,13 @@ internal sealed partial class GlPanel
                 Strength = triggerDto.Strength <= 0 ? 10.0f : triggerDto.Strength,
                 CooldownSeconds = triggerDto.CooldownSeconds <= 0 ? 1.0f : triggerDto.CooldownSeconds,
                 TargetOffset = triggerDto.TargetOffset?.ToVector3() ?? Vector3.Zero,
-            });
+            };
+            foreach (var outputDto in triggerDto.Outputs ?? [])
+                trigger.Outputs.Add(outputDto.ToOutput());
+            _triggers.Add(trigger);
         }
+
+        LoadMechanismDtos(dto.Mechanisms ?? []);
 
         _zeroG = dto.ZeroGravity;
         _waterOn = dto.WaterOn || _world.Waters.Count > 0;
@@ -189,6 +198,7 @@ internal sealed class SceneDto
     public List<SceneForceFieldDto>? Fields { get; set; }
     public List<SceneWaterDto>? Waters { get; set; }
     public List<SceneTriggerDto>? Triggers { get; set; }
+    public List<SceneMechanismDto>? Mechanisms { get; set; }
 }
 
 internal sealed class SceneBodyDto
@@ -198,6 +208,7 @@ internal sealed class SceneBodyDto
     public V3 Velocity { get; set; } = new();
     public V3 AngularVelocity { get; set; } = new();
     public float Density { get; set; } = 1f;
+    public string MaterialId { get; set; } = "Custom";
     public float Restitution { get; set; }
     public float Friction { get; set; }
     public bool IsStatic { get; set; }
@@ -206,6 +217,11 @@ internal sealed class SceneBodyDto
     public bool Breakable { get; set; }
     public float BreakThreshold { get; set; } = 7.5f;
     public int BreakPieces { get; set; } = 8;
+    public float Flammability { get; set; } = 0.7f;
+    public float Conductivity { get; set; } = 0.05f;
+    public float ExplosivePower { get; set; }
+    public float Wetness { get; set; }
+    public float Temperature { get; set; } = 20f;
     public List<SceneChildShapeDto> Children { get; set; } = [];
 
     public static SceneBodyDto FromBody(RigidBody b) => new()
@@ -215,6 +231,7 @@ internal sealed class SceneBodyDto
         Velocity = V3.From(b.Velocity),
         AngularVelocity = V3.From(b.AngularVelocity),
         Density = b.Density,
+        MaterialId = b.MaterialId.ToString(),
         Restitution = b.Restitution,
         Friction = b.Friction,
         IsStatic = b.IsStatic,
@@ -223,6 +240,11 @@ internal sealed class SceneBodyDto
         Breakable = b.Breakable,
         BreakThreshold = b.BreakThreshold,
         BreakPieces = b.BreakPieces,
+        Flammability = b.Flammability,
+        Conductivity = b.Conductivity,
+        ExplosivePower = b.ExplosivePower,
+        Wetness = b.Wetness,
+        Temperature = b.Temperature,
         Children = b.Children.Select(SceneChildShapeDto.FromChild).ToList(),
     };
 
@@ -238,6 +260,7 @@ internal sealed class SceneBodyDto
         b.Velocity = Velocity.ToVector3();
         b.AngularVelocity = AngularVelocity.ToVector3();
         b.Density = MathF.Max(Density, 0.001f);
+        b.MaterialId = Materials.TryParse(MaterialId, out var materialId) ? materialId : Materials.GuessFromValues(b);
         b.Restitution = Restitution;
         b.Friction = Friction;
         if (IsStatic) b.SetStatic(true);
@@ -245,6 +268,11 @@ internal sealed class SceneBodyDto
         b.Breakable = Breakable;
         b.BreakThreshold = BreakThreshold <= 0 ? 7.5f : BreakThreshold;
         b.BreakPieces = BreakPieces <= 0 ? 8 : BreakPieces;
+        b.Flammability = Flammability;
+        b.Conductivity = Conductivity;
+        b.ExplosivePower = ExplosivePower;
+        b.Wetness = Wetness;
+        b.Temperature = Temperature <= 0 ? 20f : Temperature;
         b.Color = Color.ToVector3();
         b.Sleeping = Sleeping;
         b.UpdateDerived();
@@ -345,7 +373,9 @@ internal sealed class SceneWaterDto
 
 internal sealed class SceneTriggerDto
 {
+    public string Id { get; set; } = "";
     public string Name { get; set; } = "Trigger";
+    public string DisplayName { get; set; } = "";
     public V3 Position { get; set; } = new();
     public V3 HalfExtents { get; set; } = V3.From(new Vector3(0.9f, 0.08f, 0.9f));
     public string Action { get; set; } = nameof(TriggerActionKind.Explosion);
@@ -355,10 +385,13 @@ internal sealed class SceneTriggerDto
     public float Strength { get; set; } = 10.0f;
     public float CooldownSeconds { get; set; } = 1.0f;
     public V3? TargetOffset { get; set; }
+    public List<TriggerOutputDto>? Outputs { get; set; }
 
     public static SceneTriggerDto FromTrigger(SceneTrigger trigger) => new()
     {
+        Id = trigger.Id,
         Name = trigger.Name,
+        DisplayName = trigger.DisplayName,
         Position = V3.From(trigger.Position),
         HalfExtents = V3.From(trigger.HalfExtents),
         Action = trigger.Action.ToString(),
@@ -368,7 +401,45 @@ internal sealed class SceneTriggerDto
         Strength = trigger.Strength,
         CooldownSeconds = trigger.CooldownSeconds,
         TargetOffset = V3.From(trigger.TargetOffset),
+        Outputs = trigger.Outputs.Select(TriggerOutputDto.FromOutput).ToList(),
     };
+}
+
+internal sealed class TriggerOutputDto
+{
+    public string TargetId { get; set; } = "";
+    public string TargetName { get; set; } = "";
+    public string Action { get; set; } = nameof(TriggerActionKind.Explosion);
+    public float Delay { get; set; }
+    public float Radius { get; set; } = 5.0f;
+    public float Strength { get; set; } = 10.0f;
+    public bool Enabled { get; set; } = true;
+
+    public static TriggerOutputDto FromOutput(TriggerOutput output) => new()
+    {
+        TargetId = output.TargetId,
+        TargetName = output.TargetName,
+        Action = output.Action.ToString(),
+        Delay = output.Delay,
+        Radius = output.Radius,
+        Strength = output.Strength,
+        Enabled = output.Enabled,
+    };
+
+    public TriggerOutput ToOutput()
+    {
+        if (!Enum.TryParse<TriggerActionKind>(Action, out var action)) action = TriggerActionKind.Explosion;
+        return new TriggerOutput
+        {
+            TargetId = TargetId ?? "",
+            TargetName = TargetName ?? "",
+            Action = action,
+            Delay = MathF.Max(0f, Delay),
+            Radius = Radius <= 0 ? 5.0f : Radius,
+            Strength = Strength <= 0 ? 10.0f : Strength,
+            Enabled = Enabled,
+        };
+    }
 }
 
 internal sealed class V3

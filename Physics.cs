@@ -231,6 +231,7 @@ internal sealed class RigidBody
     public float Mass;
     public float InvMass;
     public float Density = 1f;   // kept around so buoyancy can recover the volume (V = m / rho)
+    public MaterialId MaterialId = MaterialId.Custom; // engine-level gameplay material, not just UI values
     public Mat3 InvInertiaLocal;
     public Mat3 InvInertiaWorld;
 
@@ -248,7 +249,11 @@ internal sealed class RigidBody
     // ---- thermal state (read/written by HeatSystem; the solver ignores all of this) ----
     public float Temperature = 20f;   // °C-ish; ambient is 20
     public bool Burning;              // currently on fire
-    public float Flammability = 0.7f; // 0 = will never ignite. Also gated by density (metal/stone resist).
+    public float Flammability = 0.7f; // 0 = will never ignite. Also gated by density/wetness.
+    public float Conductivity = 0.05f; // 0 = insulator, 1 = good conductor (wetness boosts this).
+    public float ExplosivePower;        // 0 = inert, >0 detonation strength multiplier.
+    public float Wetness;              // 0..1, raised by water volumes, dries over time.
+    public float Charge;               // transient electricity charge/arc state for gameplay + VFX.
 
     // Optional toy destruction. Kept deliberately simple: fragile bodies are replaced
     // by a few smaller pieces when they take a hard enough impact.
@@ -477,6 +482,7 @@ internal sealed class RigidBody
             Velocity = Vector3.Zero,
             AngularVelocity = Vector3.Zero,
             Density = Density,
+            MaterialId = MaterialId,
             Restitution = Restitution,
             Friction = Friction,
             Color = Color,
@@ -484,6 +490,11 @@ internal sealed class RigidBody
             Breakable = Breakable,
             BreakThreshold = BreakThreshold,
             BreakPieces = BreakPieces,
+            Flammability = Flammability,
+            Conductivity = Conductivity,
+            ExplosivePower = ExplosivePower,
+            Wetness = Wetness,
+            Temperature = Temperature,
             Sleeping = false,
         };
         clone.Proxies = new ShapeProxy[clone.Children.Length];
@@ -707,6 +718,16 @@ internal sealed class WaterVolume
         float k = 1f / (1f + LinearDrag * submerged * h);
         b.Velocity *= k;
         b.AngularVelocity *= k;
+
+        // Gameplay wetness: water volumes are not just visual/buoyancy. They also feed
+        // the interaction matrix: wet bodies resist fire and conduct electricity better.
+        b.Wetness = Math.Clamp(b.Wetness + submerged * h * 3.5f, 0f, 1f);
+        if (submerged > 0.25f && b.Burning)
+        {
+            b.Burning = false;
+            if (b.Tag is RagdollBone bone) bone.Burning = false;
+            b.Temperature = MathF.Min(b.Temperature, 80f);
+        }
     }
 }
 
@@ -872,6 +893,14 @@ internal sealed class Joint
     private static Vector3 SkewMul(Vector3 r, Vector3 v) => Vector3.Cross(r, v);
 }
 
+internal readonly record struct BreakEvent(
+    Vector3 Position,
+    Vector3 Normal,
+    float Speed,
+    MaterialId MaterialId,
+    Vector3 Color,
+    int Pieces);
+
 internal sealed class PhysicsWorld
 {
     public const float FixedStep = 1f / 120f;
@@ -901,6 +930,9 @@ internal sealed class PhysicsWorld
 
     // strong contacts this frame, drained by the renderer to spawn sparks
     public readonly List<(Vector3 point, Vector3 normal, float speed)> Impacts = [];
+
+    // one-frame fracture events, drained by the renderer to spawn material-specific debris VFX
+    public readonly List<BreakEvent> BreakEvents = [];
     public readonly RigidBody Ground = new()
     {
         InvMass = 0f,
@@ -944,6 +976,7 @@ internal sealed class PhysicsWorld
     public void Step(float dt)
     {
         Impacts.Clear();
+        BreakEvents.Clear();
         _accumulator += MathF.Min(dt, 0.05f);
         int steps = 0;
         while (_accumulator >= FixedStep && steps++ < 8)
@@ -1009,6 +1042,8 @@ internal sealed class PhysicsWorld
             b.BiasVelocity = Vector3.Zero;
             b.BiasAngularVelocity = Vector3.Zero;
             if (b.RippleCooldown > 0f) b.RippleCooldown -= h;
+            if (b.Wetness > 0f) b.Wetness = MathF.Max(0f, b.Wetness - h * 0.18f);
+            if (b.Charge > 0f) b.Charge = MathF.Max(0f, b.Charge - h * 0.85f);
 
             // mild damping keeps stacks from buzzing
             b.Velocity *= 1f / (1f + 0.02f * h);
@@ -1078,27 +1113,29 @@ internal sealed class PhysicsWorld
     {
         if (_contacts.Count == 0 || Bodies.Count > 520) return;
 
-        var toBreak = new HashSet<RigidBody>();
+        var toBreak = new Dictionary<RigidBody, (float speed, Vector3 point, Vector3 normal)>();
         foreach (var c in _contacts)
         {
             if (c.ImpactSpeed < 1f) continue;
-            TryMarkBreakable(c.A, c.ImpactSpeed, toBreak);
-            TryMarkBreakable(c.B, c.ImpactSpeed, toBreak);
+            TryMarkBreakable(c.A, c.ImpactSpeed, c.Point, c.Normal, toBreak);
+            TryMarkBreakable(c.B, c.ImpactSpeed, c.Point, -c.Normal, toBreak);
         }
 
-        foreach (var b in toBreak)
-            BreakBody(b);
+        foreach (var (b, hit) in toBreak)
+            BreakBody(b, hit.point, hit.normal, hit.speed);
     }
 
-    private static void TryMarkBreakable(RigidBody b, float impactSpeed, HashSet<RigidBody> toBreak)
+    private static void TryMarkBreakable(RigidBody b, float impactSpeed, Vector3 point, Vector3 normal, Dictionary<RigidBody, (float speed, Vector3 point, Vector3 normal)> toBreak)
     {
         if (b.IsStatic || !b.UserObject || !b.Breakable) return;
         if (b.BoundingRadius < 0.16f) return;
-        if (impactSpeed >= MathF.Max(0.5f, b.BreakThreshold))
-            toBreak.Add(b);
+        if (impactSpeed < MathF.Max(0.5f, b.BreakThreshold)) return;
+
+        if (!toBreak.TryGetValue(b, out var existing) || impactSpeed > existing.speed)
+            toBreak[b] = (impactSpeed, point, normal);
     }
 
-    private void BreakBody(RigidBody b)
+    private void BreakBody(RigidBody b, Vector3 hitPoint, Vector3 hitNormal, float impactSpeed)
     {
         if (!Bodies.Contains(b)) return;
 
@@ -1107,6 +1144,14 @@ internal sealed class PhysicsWorld
             CreateBreakPiecesForChild(b, child, pieces);
 
         if (pieces.Count == 0) return;
+
+        BreakEvents.Add(new BreakEvent(
+            hitPoint,
+            hitNormal.LengthSquared() > 1e-6f ? Vector3.Normalize(hitNormal) : Vector3.UnitY,
+            impactSpeed,
+            b.MaterialId,
+            b.Color,
+            pieces.Count));
 
         var originalVel = b.Velocity;
         var originalAng = b.AngularVelocity;
@@ -1117,8 +1162,12 @@ internal sealed class PhysicsWorld
         foreach (var p in pieces)
         {
             p.Color = Vector3.Clamp(color * (0.75f + (float)_breakRng.NextDouble() * 0.35f), Vector3.Zero, Vector3.One);
+            p.MaterialId = b.MaterialId;
             p.Friction = b.Friction;
             p.Restitution = MathF.Max(b.Restitution, 0.18f);
+            p.Flammability = b.Flammability;
+            p.Conductivity = b.Conductivity;
+            p.ExplosivePower = 0f; // debris does not chain-detonate by default
             p.Breakable = false; // one-level fracture keeps runaway debris under control
             p.BreakThreshold = b.BreakThreshold;
             p.Velocity = originalVel + RandomUnit() * (1.0f + (float)_breakRng.NextDouble() * 2.5f);
@@ -1139,6 +1188,24 @@ internal sealed class PhysicsWorld
         {
             var he = child.HalfExtents;
             if (he.LengthSquared() < 0.03f) return;
+
+            switch (source.MaterialId)
+            {
+                case MaterialId.Wood:
+                    CreateWoodSplinters(source, childPos, childRot, he, pieces, maxPieces);
+                    return;
+                case MaterialId.Glass:
+                case MaterialId.Ice:
+                    CreateGlassShards(source, childPos, childRot, he, pieces, maxPieces);
+                    return;
+                case MaterialId.Stone:
+                    CreateStoneChunks(source, childPos, childRot, he, pieces, maxPieces);
+                    return;
+                case MaterialId.Plastic:
+                case MaterialId.Synthetic:
+                    CreatePlasticFragments(source, childPos, childRot, he, pieces, maxPieces);
+                    return;
+            }
 
             var smallHe = Vector3.Max(he * 0.46f, new Vector3(0.06f));
             int made = 0;
@@ -1184,6 +1251,80 @@ internal sealed class PhysicsWorld
         }
     }
 
+
+    private void CreateWoodSplinters(RigidBody source, Vector3 childPos, Quaternion childRot, Vector3 he, List<RigidBody> pieces, int maxPieces)
+    {
+        int count = Math.Clamp(maxPieces, 4, 14);
+        int axis = he.X >= he.Y && he.X >= he.Z ? 0 : (he.Y >= he.Z ? 1 : 2);
+        for (int i = 0; i < count; i++)
+        {
+            var local = new Vector3(Rand(-he.X * 0.65f, he.X * 0.65f), Rand(-he.Y * 0.65f, he.Y * 0.65f), Rand(-he.Z * 0.65f, he.Z * 0.65f));
+            var splinter = new Vector3(
+                axis == 0 ? MathF.Max(he.X * Rand(0.28f, 0.55f), 0.05f) : MathF.Max(he.X * Rand(0.08f, 0.18f), 0.035f),
+                axis == 1 ? MathF.Max(he.Y * Rand(0.28f, 0.55f), 0.05f) : MathF.Max(he.Y * Rand(0.08f, 0.18f), 0.035f),
+                axis == 2 ? MathF.Max(he.Z * Rand(0.28f, 0.55f), 0.05f) : MathF.Max(he.Z * Rand(0.08f, 0.18f), 0.035f));
+            var p = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), splinter, MathF.Max(source.Density, 0.001f));
+            p.Rotation = childRot;
+            p.UpdateDerived();
+            pieces.Add(p);
+        }
+    }
+
+    private void CreateGlassShards(RigidBody source, Vector3 childPos, Quaternion childRot, Vector3 he, List<RigidBody> pieces, int maxPieces)
+    {
+        int count = Math.Clamp(maxPieces + 4, 8, 18);
+        for (int i = 0; i < count; i++)
+        {
+            var local = new Vector3(Rand(-he.X * 0.75f, he.X * 0.75f), Rand(-he.Y * 0.75f, he.Y * 0.75f), Rand(-he.Z * 0.75f, he.Z * 0.75f));
+            var shard = new Vector3(
+                MathF.Max(he.X * Rand(0.10f, 0.26f), 0.025f),
+                MathF.Max(he.Y * Rand(0.035f, 0.09f), 0.012f),
+                MathF.Max(he.Z * Rand(0.10f, 0.26f), 0.025f));
+            var p = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), shard, MathF.Max(source.Density, 0.001f));
+            p.Rotation = childRot;
+            p.Restitution = MathF.Max(p.Restitution, 0.28f);
+            p.UpdateDerived();
+            pieces.Add(p);
+        }
+    }
+
+    private void CreateStoneChunks(RigidBody source, Vector3 childPos, Quaternion childRot, Vector3 he, List<RigidBody> pieces, int maxPieces)
+    {
+        int count = Math.Clamp(maxPieces, 5, 12);
+        for (int i = 0; i < count; i++)
+        {
+            var local = new Vector3(Rand(-he.X * 0.60f, he.X * 0.60f), Rand(-he.Y * 0.60f, he.Y * 0.60f), Rand(-he.Z * 0.60f, he.Z * 0.60f));
+            var chunk = new Vector3(
+                MathF.Max(he.X * Rand(0.22f, 0.42f), 0.045f),
+                MathF.Max(he.Y * Rand(0.18f, 0.42f), 0.045f),
+                MathF.Max(he.Z * Rand(0.22f, 0.42f), 0.045f));
+            var p = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), chunk, MathF.Max(source.Density, 0.001f));
+            p.Rotation = childRot;
+            p.Restitution = 0.08f;
+            p.UpdateDerived();
+            pieces.Add(p);
+        }
+    }
+
+    private void CreatePlasticFragments(RigidBody source, Vector3 childPos, Quaternion childRot, Vector3 he, List<RigidBody> pieces, int maxPieces)
+    {
+        int count = Math.Clamp(maxPieces, 5, 12);
+        for (int i = 0; i < count; i++)
+        {
+            var local = new Vector3(Rand(-he.X * 0.65f, he.X * 0.65f), Rand(-he.Y * 0.65f, he.Y * 0.65f), Rand(-he.Z * 0.65f, he.Z * 0.65f));
+            var frag = new Vector3(
+                MathF.Max(he.X * Rand(0.18f, 0.38f), 0.035f),
+                MathF.Max(he.Y * Rand(0.12f, 0.32f), 0.030f),
+                MathF.Max(he.Z * Rand(0.18f, 0.38f), 0.035f));
+            var p = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), frag, MathF.Max(source.Density, 0.001f));
+            p.Rotation = childRot;
+            p.Restitution = MathF.Max(source.Restitution, 0.22f);
+            p.UpdateDerived();
+            pieces.Add(p);
+        }
+    }
+
+    private float Rand(float min, float max) => min + (float)_breakRng.NextDouble() * (max - min);
     private Vector3 RandomUnit()
     {
         var v = new Vector3(

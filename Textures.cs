@@ -136,6 +136,98 @@ internal static class Textures
         }), size);
     }
 
+
+
+    /// <summary>Android shell: pale panels with seams and cool cyan circuitry accents.</summary>
+    public static uint CreateAndroidPanel(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float panel = 0.86f + (Fbm(u * 20f, v * 20f, 161) - 0.5f) * 0.06f;
+            float seam = 1f;
+            if (MathF.Abs(u - 0.50f) < 0.02f || MathF.Abs(v - 0.50f) < 0.02f) seam = 0.72f;
+            float accent = 0f;
+            if ((u > 0.18f && u < 0.82f && MathF.Abs(v - 0.24f) < 0.03f) ||
+                (u > 0.18f && u < 0.82f && MathF.Abs(v - 0.76f) < 0.03f))
+                accent = 1f;
+
+            float r = panel * seam;
+            float g = panel * seam;
+            float b = MathF.Min(1f, panel * seam * 1.05f);
+            if (accent > 0.5f)
+            {
+                r = 0.24f; g = 0.88f; b = 0.95f;
+            }
+            return (r, g, b);
+        }), size);
+    }
+
+    /// <summary>Vehicle body paint: glossy paint with a darker windshield band and subtle grime.</summary>
+    public static uint CreateVehiclePaint(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float noise = (Fbm(u * 18f, v * 18f, 173) - 0.5f) * 0.05f;
+            float highlight = 0.90f + 0.10f * MathF.Sin((u * 1.8f + v * 0.6f) * MathF.PI);
+            float r = 0.88f * highlight + noise;
+            float g = 0.18f * highlight + noise * 0.35f;
+            float b = 0.14f * highlight + noise * 0.25f;
+            if (v > 0.18f && v < 0.38f && u > 0.18f && u < 0.82f)
+            {
+                r = 0.10f; g = 0.13f; b = 0.17f;
+            }
+            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
+        }), size);
+    }
+
+    /// <summary>Tyre texture: dark rubber with sidewall ring and a hint of tread.</summary>
+    public static uint CreateTire(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float tread = 0.10f + 0.02f * MathF.Sin(v * MathF.PI * 40f);
+            float ring = MathF.Abs(u - 0.50f) > 0.32f ? 0.05f : 0f;
+            float val = 0.08f + tread + ring + (Fbm(u * 30f, v * 30f, 181) - 0.5f) * 0.03f;
+            return (val, val, val + 0.01f);
+        }), size);
+    }
+
+    /// <summary>Explosive barrel: painted drum body, dark ribs and a warning label stripe.</summary>
+    public static uint CreateBarrel(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float ribs = 1f;
+            if (v < 0.12f || v > 0.88f) ribs = 0.48f;
+            else if (MathF.Abs(v - 0.50f) < 0.07f) ribs = 0.72f;
+
+            float baseR = 0.88f, baseG = 0.17f, baseB = 0.08f;
+            float n = (Fbm(u * 16f, v * 28f, 123) - 0.5f) * 0.10f;
+            float scratch = MathF.Sin(u * MathF.PI * 18f + v * 3f) * 0.02f;
+            float shade = Math.Clamp(ribs + n + scratch, 0.30f, 1.15f);
+
+            float r = baseR * shade;
+            float g = baseG * shade;
+            float b = baseB * shade;
+
+            // center warning label with diagonal hazard pattern
+            if (MathF.Abs(v - 0.50f) < 0.11f && u > 0.22f && u < 0.78f)
+            {
+                float stripe = MathF.Sin((u * 26f + v * 18f) * MathF.PI);
+                bool black = stripe > 0f;
+                r = black ? 0.08f : 0.96f;
+                g = black ? 0.08f : 0.82f;
+                b = black ? 0.08f : 0.15f;
+            }
+
+            // thin metallic seams
+            if (MathF.Abs(v - 0.16f) < 0.01f || MathF.Abs(v - 0.84f) < 0.01f)
+                r = g = b = 0.85f;
+
+            return (r, g, b);
+        }), size);
+    }
+
     /// <summary>Walls: plain concrete with pores and faint blotches.</summary>
     public static uint CreateConcrete(int size = 256)
     {

@@ -7,6 +7,18 @@ namespace MakarovPhysicsSandbox
         private TriggerPropertiesPanel _triggerProperties = null!;
         private TabControl _propertyTabs = null!;
         private ToolStripStatusLabel _status = null!;
+        private MenuStrip _menu = null!;
+        private ToolStrip _tools = null!;
+        private StatusStrip _statusStrip = null!;
+        private Panel _hudTop = null!;
+        private Panel _hudBottom = null!;
+        private Label _hudTitle = null!;
+        private Label _hudStatus = null!;
+        private Label _hudMode = null!;
+        private Label _hudObjective = null!;
+        private Label _hudHotbar = null!;
+        private Label _hudHints = null!;
+        private bool _propertyTabsVisibleBeforeFullscreen = true;
         private ToolStripButton? _waterButton;
         private ToolStripButton? _gravityButton;
         private ToolStripButton? _soundButton;
@@ -23,13 +35,29 @@ namespace MakarovPhysicsSandbox
         private ToolStripButton? _rotateToolButton;
         private ToolStripButton? _scaleToolButton;
         private ToolStripButton? _propertiesButton;
+        private ToolStripButton? _wiringButton;
+        private ToolStripDropDownButton? _catalogButton;
+        private ContextMenuStrip _catalogContext = null!;
+        private Panel _startOverlay = null!;
+        private Label _startSubtitle = null!;
+        private Panel _resultOverlay = null!;
+        private Label _resultTitle = null!;
+        private Label _resultDetail = null!;
+        private Label _resultStars = null!;
+        private ToolStripButton? _startTestButton;
+        private readonly LaunchOptions _launchOptions;
         private bool _isFullscreen;
         private FormBorderStyle _previousBorderStyle;
         private Rectangle _previousBounds;
         private FormWindowState _previousWindowState;
 
-        public MakarovPhysicsSandbox()
+        public MakarovPhysicsSandbox() : this(LaunchOptions.Default)
         {
+        }
+
+        internal MakarovPhysicsSandbox(LaunchOptions launchOptions)
+        {
+            _launchOptions = launchOptions;
             InitializeComponent();
             BuildUi();
 
@@ -48,7 +76,7 @@ namespace MakarovPhysicsSandbox
 
             _gl = new GlPanel { Dock = DockStyle.Fill };
             _gl.StatusUpdated += OnStatus;
-            _gl.StateChanged += UpdateToolbarState;
+            _gl.StateChanged += () => { UpdateToolbarState(); UpdateResultOverlay(); };
             _gl.HelpRequested += ShowHelp;
 
             _properties = new ObjectPropertiesPanel { Dock = DockStyle.Fill };
@@ -78,36 +106,68 @@ namespace MakarovPhysicsSandbox
             _triggerProperties.ApplyRequested += props => _gl.ApplySelectedTriggerProperties(props);
             _triggerProperties.DeleteRequested += () => _gl.DeleteSelectedTrigger();
             _triggerProperties.DuplicateRequested += () => _gl.DuplicateSelectedTrigger();
+            _triggerProperties.SnapTargetRequested += () => _gl.SnapSelectedTriggerTargetToNearestMechanism();
+            _triggerProperties.RemoveOutputRequested += index => _gl.RemoveSelectedTriggerOutput(index);
+            _triggerProperties.TestOutputRequested += index => _gl.TestSelectedTriggerOutput(index);
+            _triggerProperties.ClearOutputsRequested += () => _gl.ClearSelectedTriggerOutputs();
+            _triggerProperties.UpdateOutputRequested += (index, action, delay, radius, strength, enabled) =>
+                _gl.UpdateSelectedTriggerOutput(index, action, delay, radius, strength, enabled);
 
-            var menu = BuildMenu();
-            var tools = BuildToolbar();
+            _menu = BuildMenu();
+            _tools = BuildToolbar();
 
-            var statusStrip = new StatusStrip();
+            _statusStrip = new StatusStrip();
             _status = new ToolStripStatusLabel("Ready — Q select · M move · O rotate · S scale · 1–9 spawn · E explosion · H help")
             {
                 Spring = true,
                 TextAlign = ContentAlignment.MiddleLeft,
             };
-            statusStrip.Items.Add(_status);
+            _statusStrip.Items.Add(_status);
+
+            BuildFullscreenHud();
+            BuildStartScreen();
+            BuildResultOverlay();
+            _catalogContext = BuildSpawnCatalogContext();
 
             // Add the fill control first, then the docked bars; WinForms resolves docking
             // by reverse z-order, so this leaves the GL panel filling the space between
             // the toolbar on top and the status bar on the bottom.
             Controls.Add(_gl);
             Controls.Add(_propertyTabs);
-            Controls.Add(tools);
-            Controls.Add(statusStrip);
-            Controls.Add(menu);
-            MainMenuStrip = menu;
-            ApplyPolishedTheme(menu, tools, statusStrip);
+            Controls.Add(_tools);
+            Controls.Add(_statusStrip);
+            Controls.Add(_menu);
+            Controls.Add(_hudBottom);
+            Controls.Add(_hudTop);
+            Controls.Add(_startOverlay);
+            Controls.Add(_resultOverlay);
+            _hudTop.BringToFront();
+            _hudBottom.BringToFront();
+            _startOverlay.BringToFront();
+            _resultOverlay.BringToFront();
+            MainMenuStrip = _menu;
+            ApplyPolishedTheme(_menu, _tools, _statusStrip);
+            SetFullscreenHudVisible(false);
+            SetStartOverlayVisible(false);
+            SetResultOverlayVisible(false);
 
-            Shown += (_, _) => _gl.Focus();
+            Shown += (_, _) => BeginInitialLaunchMode();
+            Resize += (_, _) => { LayoutFullscreenHud(); LayoutStartScreen(); LayoutResultOverlay(); };
+            LayoutFullscreenHud();
+            LayoutStartScreen();
+            LayoutResultOverlay();
             UpdateToolbarState();
         }
 
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (_startOverlay?.Visible == true && keyData == Keys.Escape)
+            {
+                SetStartOverlayVisible(false);
+                _gl.Focus();
+                return true;
+            }
             if (keyData == (Keys.Control | Keys.S))
             {
                 SaveSceneAs();
@@ -128,6 +188,33 @@ namespace MakarovPhysicsSandbox
                 ToggleFullscreen();
                 return true;
             }
+            if (keyData == Keys.W)
+            {
+                _gl.ToggleTriggerWiring();
+                UpdateToolbarState();
+                return true;
+            }
+            if (keyData == Keys.F6)
+            {
+                ShowSpawnCatalog();
+                return true;
+            }
+            if (keyData == Keys.F7)
+            {
+                _gl.SnapSelectedTriggerTargetToNearestMechanism();
+                UpdateToolbarState();
+                return true;
+            }
+            if (keyData == Keys.F5)
+            {
+                ShowStartScreen();
+                return true;
+            }
+            if (keyData == Keys.F8)
+            {
+                StartVerticalSliceTest();
+                return true;
+            }
             if (keyData == (Keys.Control | Keys.D))
             {
                 _gl.DuplicateSelectedBody();
@@ -139,7 +226,392 @@ namespace MakarovPhysicsSandbox
         private void OnStatus(string text)
         {
             if (!IsHandleCreated || IsDisposed) return;
-            BeginInvoke(() => _status.Text = text);
+            BeginInvoke(() =>
+            {
+                _status.Text = text;
+                if (_hudStatus != null) _hudStatus.Text = text;
+            });
+        }
+
+
+        private void BeginInitialLaunchMode()
+        {
+            if (!string.IsNullOrWhiteSpace(_launchOptions.Preset))
+            {
+                _gl.LoadPreset(_launchOptions.Preset);
+                _status.Text = $"Preset loaded: {_launchOptions.Preset}";
+            }
+
+            if (_launchOptions.PlayMode && !_isFullscreen)
+                ToggleFullscreen();
+
+            if (_launchOptions.ShowStartScreen)
+                ShowStartScreen();
+            else
+                _gl.Focus();
+        }
+
+        private void BuildStartScreen()
+        {
+            _startOverlay = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(235, 18, 21, 27),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(28),
+            };
+
+            var title = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 44,
+                Text = "MAKAROV PHYSICS SANDBOX",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Semibold", 18F, FontStyle.Bold),
+                ForeColor = Color.WhiteSmoke,
+            };
+            _startSubtitle = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 64,
+                Text = "Physics sandbox prototype · synthetic dummies · vehicles · mechanisms · chain reactions",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = Color.Gainsboro,
+            };
+
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(90, 16, 90, 16),
+            };
+            AddStartButton(buttons, "Continue sandbox", () => { SetStartOverlayVisible(false); _gl.Focus(); });
+            AddStartButton(buttons, "Start vertical slice: Android Crash Test", () => { SetStartOverlayVisible(false); _gl.LoadVerticalSlice(); StartVerticalSliceTest(); });
+            AddStartButton(buttons, "Load vertical slice room", () => { SetStartOverlayVisible(false); _gl.LoadVerticalSlice(); UpdateToolbarState(); _gl.Focus(); });
+            AddStartButton(buttons, "Android Stress Chamber", () => LoadStartPreset("Android Stress Chamber"));
+            AddStartButton(buttons, "Piston Crusher Lab", () => LoadStartPreset("Piston Crusher Lab"));
+            AddStartButton(buttons, "Conveyor Chain Lab", () => LoadStartPreset("Conveyor Chain Lab"));
+            AddStartButton(buttons, "Open spawn catalog", () => { SetStartOverlayVisible(false); ShowSpawnCatalog(); });
+            AddStartButton(buttons, "Return to editor view", () =>
+            {
+                SetStartOverlayVisible(false);
+                if (_isFullscreen) ToggleFullscreen();
+                _gl.Focus();
+            });
+
+            var footer = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Bottom,
+                Height = 32,
+                Text = "F5 title screen · F8 start test · F6 catalog · F11 editor/play view · Esc close overlay",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = Color.FromArgb(170, 180, 190),
+            };
+
+            _startOverlay.Controls.Add(buttons);
+            _startOverlay.Controls.Add(_startSubtitle);
+            _startOverlay.Controls.Add(title);
+            _startOverlay.Controls.Add(footer);
+        }
+
+        private void AddStartButton(FlowLayoutPanel parent, string text, Action action)
+        {
+            var b = new Button
+            {
+                Text = text,
+                Width = 360,
+                Height = 42,
+                Margin = new Padding(0, 6, 0, 6),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(42, 48, 58),
+                ForeColor = Color.WhiteSmoke,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+            };
+            b.FlatAppearance.BorderColor = Color.FromArgb(78, 88, 104);
+            b.Click += (_, _) => action();
+            parent.Controls.Add(b);
+        }
+
+        private void LoadStartPreset(string name)
+        {
+            _gl.LoadPreset(name);
+            _status.Text = $"Preset loaded: {name}";
+            SetStartOverlayVisible(false);
+            UpdateToolbarState();
+            _gl.Focus();
+        }
+
+        private void LayoutStartScreen()
+        {
+            if (_startOverlay == null) return;
+            int w = Math.Min(620, Math.Max(420, ClientSize.Width - 80));
+            int h = Math.Min(520, Math.Max(420, ClientSize.Height - 80));
+            _startOverlay.Bounds = new Rectangle((ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+        }
+
+        private void SetStartOverlayVisible(bool visible)
+        {
+            if (_startOverlay == null) return;
+            _startOverlay.Visible = visible;
+            if (visible)
+            {
+                LayoutStartScreen();
+                _startOverlay.BringToFront();
+            }
+        }
+
+        private void ShowStartScreen()
+        {
+            if (_startSubtitle != null)
+                _startSubtitle.Text = _isFullscreen
+                    ? "Play-mode shell · choose a preset, open the catalog, or continue the current scene"
+                    : "Editor shell · use F11 for play view, or choose a preset to test the sandbox loop";
+            SetStartOverlayVisible(true);
+        }
+
+        private void BuildResultOverlay()
+        {
+            _resultOverlay = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(238, 16, 18, 24),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(24),
+            };
+
+            _resultTitle = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 42,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Semibold", 17F, FontStyle.Bold),
+                ForeColor = Color.WhiteSmoke,
+            };
+            _resultStars = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 38,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(255, 218, 92),
+            };
+            _resultDetail = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 86,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = Color.Gainsboro,
+            };
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                Padding = new Padding(70, 8, 70, 8),
+            };
+            AddStartButton(buttons, "Retry test", () => { SetResultOverlayVisible(false); _gl.RetryVerticalSlice(); });
+            AddStartButton(buttons, "Back to title", () => { SetResultOverlayVisible(false); ShowStartScreen(); });
+            AddStartButton(buttons, "Continue sandbox", () => { SetResultOverlayVisible(false); _gl.DismissVerticalSliceResult(); _gl.Focus(); });
+
+            _resultOverlay.Controls.Add(buttons);
+            _resultOverlay.Controls.Add(_resultDetail);
+            _resultOverlay.Controls.Add(_resultStars);
+            _resultOverlay.Controls.Add(_resultTitle);
+        }
+
+        private void LayoutResultOverlay()
+        {
+            if (_resultOverlay == null) return;
+            int w = Math.Min(520, Math.Max(380, ClientSize.Width - 100));
+            int h = Math.Min(360, Math.Max(300, ClientSize.Height - 120));
+            _resultOverlay.Bounds = new Rectangle((ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+        }
+
+        private void SetResultOverlayVisible(bool visible)
+        {
+            if (_resultOverlay == null) return;
+            _resultOverlay.Visible = visible;
+            if (visible)
+            {
+                LayoutResultOverlay();
+                _resultOverlay.BringToFront();
+            }
+        }
+
+        private void UpdateResultOverlay()
+        {
+            if (_resultOverlay == null || !_gl.IsVerticalSliceFinished) return;
+            _resultTitle.Text = _gl.VerticalSliceResultTitle;
+            _resultDetail.Text = _gl.VerticalSliceResultDetail;
+            _resultStars.Text = new string('★', _gl.VerticalSliceStars) + new string('☆', Math.Max(0, 3 - _gl.VerticalSliceStars));
+            SetResultOverlayVisible(true);
+        }
+
+        private void StartVerticalSliceTest()
+        {
+            SetStartOverlayVisible(false);
+            SetResultOverlayVisible(false);
+            _gl.StartVerticalSliceTest();
+            UpdateToolbarState();
+        }
+
+        private void BuildFullscreenHud()
+        {
+            _hudTop = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(24, 28, 34),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(12, 10, 12, 10),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                Height = 92,
+            };
+
+            _hudTitle = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 22,
+                Text = "MAKAROV PHYSICS SANDBOX — PLAY MODE",
+                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                ForeColor = Color.WhiteSmoke,
+            };
+            _hudObjective = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Bottom,
+                Height = 20,
+                Font = new Font("Segoe UI", 9F, FontStyle.Italic),
+                ForeColor = Color.FromArgb(255, 230, 164),
+                Text = "Free sandbox — load a preset or challenge to see a goal here.",
+            };
+            _hudStatus = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                Text = _status?.Text ?? "Ready",
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = Color.Gainsboro,
+            };
+            _hudMode = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Right,
+                Width = 320,
+                TextAlign = ContentAlignment.TopRight,
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(124, 214, 255),
+            };
+            _hudTop.Controls.Add(_hudStatus);
+            _hudTop.Controls.Add(_hudMode);
+            _hudTop.Controls.Add(_hudObjective);
+            _hudTop.Controls.Add(_hudTitle);
+
+            _hudBottom = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(24, 28, 34),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(12, 8, 12, 8),
+                Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
+                Height = 64,
+            };
+            _hudHotbar = new Label
+            {
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                Height = 22,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Semibold", 9F, FontStyle.Bold),
+                ForeColor = Color.WhiteSmoke,
+                Text = "[F8] Start Test  [F6] Catalog  [0] Android  [N] Vehicle  [E] Boom  [I] Fire  [D] Shock",
+            };
+            _hudHints = new Label
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = Color.Gainsboro,
+                Text = "F11 editor view · H help · R reset · Space/F shoot · P pause · T slow-mo · G gravity",
+            };
+            _hudBottom.Controls.Add(_hudHints);
+            _hudBottom.Controls.Add(_hudHotbar);
+        }
+
+        private void LayoutFullscreenHud()
+        {
+            if (_hudTop == null || _hudBottom == null) return;
+            int margin = 16;
+            _hudTop.Left = margin;
+            _hudTop.Top = _menu.Visible ? _menu.Bottom + 10 : margin;
+            _hudTop.Width = ClientSize.Width - margin * 2;
+
+            _hudBottom.Left = margin;
+            _hudBottom.Top = ClientSize.Height - _hudBottom.Height - margin;
+            _hudBottom.Width = ClientSize.Width - margin * 2;
+        }
+
+        private void SetFullscreenHudVisible(bool visible)
+        {
+            if (_hudTop == null || _hudBottom == null) return;
+            _hudTop.Visible = visible;
+            _hudBottom.Visible = visible;
+            if (visible)
+            {
+                LayoutFullscreenHud();
+                _hudTop.BringToFront();
+                _hudBottom.BringToFront();
+                UpdateHudState();
+            }
+        }
+
+        private void UpdateHudState()
+        {
+            if (_hudMode == null || _hudHints == null) return;
+            if (_hudStatus != null) _hudStatus.Text = _status?.Text ?? "Ready";
+
+            string mode = _gl.ActiveEditorTool switch
+            {
+                EditorToolMode.Select => "TOOL: SELECT",
+                EditorToolMode.Move => "TOOL: MOVE",
+                EditorToolMode.Rotate => "TOOL: ROTATE",
+                EditorToolMode.Scale => "TOOL: SCALE",
+                _ => "TOOL: SELECT",
+            };
+
+            var tags = new List<string>();
+            if (_gl.IsPaused) tags.Add("PAUSED");
+            if (_gl.IsSlowMo) tags.Add("SLOW-MO");
+            if (_gl.IsZeroGravity) tags.Add("ZERO-G");
+            if (_gl.IsWaterOn) tags.Add("WATER ON");
+            if (_gl.ActiveForceField == ActiveForceFieldKind.Attractor) tags.Add("ATTRACTOR");
+            if (_gl.ActiveForceField == ActiveForceFieldKind.Repeller) tags.Add("REPELLER");
+            if (_gl.ActiveForceField == ActiveForceFieldKind.Wind) tags.Add("WIND");
+            if (_gl.PendingSceneAction != PendingSceneActionKind.None) tags.Add("ARMED: " + _gl.PendingSceneAction.ToString().ToUpperInvariant());
+            _hudMode.Text = tags.Count > 0 ? mode + Environment.NewLine + string.Join(" · ", tags) : mode + Environment.NewLine + "SANDBOX READY";
+
+            string title = _gl.CurrentScenarioTitle;
+            string goal = _gl.CurrentScenarioGoal;
+            if (_hudObjective != null)
+                _hudObjective.Text = string.IsNullOrWhiteSpace(title)
+                    ? "Free sandbox — load a preset or challenge to see a goal here."
+                    : $"Objective — {title}: {goal}";
+
+            _hudHotbar.Text = _isFullscreen
+                ? "[F8] Start Test  [F6] Catalog  [0] Android  [N] Vehicle  [E] Boom  [I] Fire  [D] Shock"
+                : "[Q] Select  [M] Move  [O] Rotate  [S] Scale  [J] Link  [K] Spring  [Del] Disconnect";
+            _hudHints.Text = _isFullscreen
+                ? "F11 editor view · F8 start test · F6 catalog · R retry/reset · Space/F shoot · T slow-mo"
+                : "Q/M/O/S tools · 1-0/N objects · J/K/Del links · F4 properties · F11 play view";
         }
 
         private ToolStrip BuildToolbar()
@@ -157,6 +629,11 @@ namespace MakarovPhysicsSandbox
 
             ts.Items.Add(new ToolStripSeparator());
 
+            _catalogButton = BuildCatalogButton();
+            ts.Items.Add(_catalogButton);
+            _startTestButton = AddToolbarButton(ts, "Start vertical slice test", "start.png", "F8", StartVerticalSliceTest);
+            ts.Items.Add(new ToolStripSeparator());
+
             AddToolbarButton(ts, "Sphere",       "sphere.png",   "1",        () => _gl.Spawn(1), placeOnScene: true);
             AddToolbarButton(ts, "Box",          "box.png",      "2",        () => _gl.Spawn(2), placeOnScene: true);
             AddToolbarButton(ts, "Capsule",      "capsule.png",  "3",        () => _gl.Spawn(3), placeOnScene: true);
@@ -167,13 +644,22 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Table",        "table.png",    "8",        () => _gl.Spawn(8), placeOnScene: true);
             AddToolbarButton(ts, "Bowling pins", "pins.png",     "9",        () => _gl.SpawnPins(), placeOnScene: true);
             AddToolbarButton(ts, "Chain",        "chain.png",    "L",        () => _gl.SpawnChain(), placeOnScene: true);
-            AddToolbarButton(ts, "Ragdoll",      "ragdoll.png",  "0",        () => _gl.SpawnRagdoll(), placeOnScene: true);
+            AddToolbarButton(ts, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), placeOnScene: true);
+            AddToolbarButton(ts, "Vehicle",       "vehicle.png", "N", () => _gl.SpawnVehicle(), placeOnScene: true);
+            AddToolbarButton(ts, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), placeOnScene: true);
+            AddToolbarButton(ts, "Motor hinge",   "motor.png",   "",  () => _gl.SpawnMotor(), placeOnScene: true);
+            AddToolbarButton(ts, "Gate",          "gate.png",    "",  () => _gl.SpawnGate(), placeOnScene: true);
+            AddToolbarButton(ts, "Timer",         "timer.png",   "",  () => _gl.SpawnTimer(), placeOnScene: true);
+            AddToolbarButton(ts, "Conveyor belt", "conveyor.png", "", () => _gl.SpawnConveyor(), placeOnScene: true);
+            AddToolbarButton(ts, "Piston actuator", "piston.png", "", () => _gl.SpawnPiston(), placeOnScene: true);
+            AddToolbarButton(ts, "Sliding door", "door.png", "", () => _gl.SpawnSlidingDoor(), placeOnScene: true);
 
             ts.Items.Add(new ToolStripSeparator());
 
             AddToolbarButton(ts, "Shoot ball",   "shoot.png",     "Space / F", () => _gl.Shoot());
             AddToolbarButton(ts, "Explosion",    "explosion.png", "E",         () => _gl.Detonate(), placeOnScene: true);
             AddToolbarButton(ts, "Ignite",       "torch.png",     "I",         () => _gl.Ignite(), placeOnScene: true);
+            AddToolbarButton(ts, "Electrify",    "electricity.png", "D",       () => _gl.Electrify(), placeOnScene: true);
             _waterButton = AddToolbarButton(ts, "Water",          "water.png",     "V", () => _gl.Water(), checkable: true);
             _attractorButton = AddToolbarButton(ts, "Attractor",  "attractor.png", "Z", () => _gl.Attractor(), checkable: true, placeOnScene: true);
             _repellerButton = AddToolbarButton(ts, "Repeller",    "repeller.png",  "X", () => _gl.Repeller(), checkable: true, placeOnScene: true);
@@ -192,6 +678,8 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Save scene", "save.png", "Ctrl+S", SaveSceneAs);
             AddToolbarButton(ts, "Load scene", "load.png", "Ctrl+O", LoadSceneFromFile);
             _propertiesButton = AddToolbarButton(ts, "Show/hide properties", "properties.png", "F4", TogglePropertiesPanel, checkable: true);
+            _wiringButton = AddToolbarButton(ts, "Show/hide trigger wiring", "wiring.png", "W", () => _gl.ToggleTriggerWiring(), checkable: true);
+            AddToolbarButton(ts, "Snap selected trigger target", "target.png", "F7", () => _gl.SnapSelectedTriggerTargetToNearestMechanism());
 
             var presets = new ToolStripDropDownButton("Presets")
             {
@@ -206,6 +694,21 @@ namespace MakarovPhysicsSandbox
             AddPresetItem(presets, "Zero-G Chaos");
             AddPresetItem(presets, "Water Playground");
             AddPresetItem(presets, "Trigger Playground");
+            AddPresetItem(presets, "Android Fire Lab");
+            AddPresetItem(presets, "Electrical Chain Lab");
+            AddPresetItem(presets, "Vehicle Crash Test");
+            AddPresetItem(presets, "Mechanism Chain Reaction");
+            AddPresetItem(presets, "Android Stress Chamber");
+            AddPresetItem(presets, "Android Crash Test Chamber");
+            AddPresetItem(presets, "Motor Gate Timer Lab");
+            AddPresetItem(presets, "Conveyor Chain Lab");
+            AddPresetItem(presets, "Piston Crusher Lab");
+            AddPresetItem(presets, "Explosive Domino");
+            AddPresetItem(presets, "Barrel Pyramid");
+            AddPresetItem(presets, "Electric Floor Trap");
+            AddPresetItem(presets, "Burning Barricade");
+            AddPresetItem(presets, "Wrecking Ball");
+            AddPresetItem(presets, "Ragdoll Bowling");
             ts.Items.Add(presets);
 
             var challenges = new ToolStripDropDownButton("Challenges")
@@ -238,6 +741,141 @@ namespace MakarovPhysicsSandbox
             return ts;
         }
 
+
+        private ToolStripDropDownButton BuildCatalogButton()
+        {
+            var button = new ToolStripDropDownButton("Catalog")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                ToolTipText = "Spawn catalog (F6): grouped objects, dummies, mechanisms and hazards",
+                AutoSize = true,
+            };
+            var icon = LoadIcon("catalog.png");
+            if (icon != null) button.Image = icon;
+            PopulateSpawnCatalog(button.DropDownItems);
+            return button;
+        }
+
+        private ContextMenuStrip BuildSpawnCatalogContext()
+        {
+            var menu = new ContextMenuStrip
+            {
+                BackColor = Color.FromArgb(31, 34, 40),
+                ForeColor = Color.Gainsboro,
+            };
+            PopulateSpawnCatalog(menu.Items);
+            return menu;
+        }
+
+        private ToolStripMenuItem BuildSpawnCatalogMenu()
+        {
+            var menu = new ToolStripMenuItem("Catalog");
+            PopulateSpawnCatalog(menu.DropDownItems);
+            return menu;
+        }
+
+        private void PopulateSpawnCatalog(ToolStripItemCollection items)
+        {
+            items.Clear();
+
+            var basic = CatalogCategory("Basic objects");
+            AddCatalogAction(basic.DropDownItems, "Sphere", "sphere.png", "1", () => _gl.Spawn(1), "Round dynamic body");
+            AddCatalogAction(basic.DropDownItems, "Box", "box.png", "2", () => _gl.Spawn(2), "General-purpose block");
+            AddCatalogAction(basic.DropDownItems, "Capsule", "capsule.png", "3", () => _gl.Spawn(3), "Rounded capsule body");
+            AddCatalogAction(basic.DropDownItems, "Plank", "plank.png", "4", () => _gl.Spawn(4), "Long wooden piece");
+            AddCatalogAction(basic.DropDownItems, "Pillar", "pillar.png", "5", () => _gl.Spawn(5), "Tall block / support");
+            AddCatalogAction(basic.DropDownItems, "Dumbbell", "dumbbell.png", "6", () => _gl.Spawn(6), "Compound test object");
+            AddCatalogAction(basic.DropDownItems, "Hammer", "hammer.png", "7", () => _gl.Spawn(7), "Impact-oriented prop");
+            AddCatalogAction(basic.DropDownItems, "Table", "table.png", "8", () => _gl.Spawn(8), "Compound furniture prop");
+            AddCatalogAction(basic.DropDownItems, "Bowling pins", "pins.png", "9", () => _gl.SpawnPins(), "Ready-made pin group");
+            AddCatalogAction(basic.DropDownItems, "Chain", "chain.png", "L", () => _gl.SpawnChain(), "Linked physics chain");
+
+            var dummies = CatalogCategory("Dummies & vehicles");
+            AddCatalogAction(dummies.DropDownItems, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), "Synthetic crash-test dummy");
+            AddCatalogAction(dummies.DropDownItems, "Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle(), "Simple crash-test vehicle rig");
+
+            var hazards = CatalogCategory("Hazards & fields");
+            AddCatalogAction(hazards.DropDownItems, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), "Detonates from fire, shock or impact");
+            AddCatalogAction(hazards.DropDownItems, "Explosion", "explosion.png", "E", () => _gl.Detonate(), "Place an explosion at the aim point");
+            AddCatalogAction(hazards.DropDownItems, "Ignite", "torch.png", "I", () => _gl.Ignite(), "Set a body or place area on fire");
+            AddCatalogAction(hazards.DropDownItems, "Electrify", "electricity.png", "D", () => _gl.Electrify(), "Shock a body or conductive chain");
+            AddCatalogAction(hazards.DropDownItems, "Water", "water.png", "V", () => _gl.Water(), "Toggle water volume");
+            AddCatalogAction(hazards.DropDownItems, "Attractor", "attractor.png", "Z", () => _gl.Attractor(), "Place an attraction field");
+            AddCatalogAction(hazards.DropDownItems, "Repeller", "repeller.png", "X", () => _gl.Repeller(), "Place a repulsion field");
+            AddCatalogAction(hazards.DropDownItems, "Wind", "wind.png", "U", () => _gl.Wind(), "Place a directional wind field");
+
+            var mechanisms = CatalogCategory("Mechanisms");
+            AddCatalogAction(mechanisms.DropDownItems, "Motor hinge", "motor.png", "", () => _gl.SpawnMotor(), "Rotating actuator");
+            AddCatalogAction(mechanisms.DropDownItems, "Gate", "gate.png", "", () => _gl.SpawnGate(), "Simple vertical gate");
+            AddCatalogAction(mechanisms.DropDownItems, "Timer", "timer.png", "", () => _gl.SpawnTimer(), "Delayed chain-reaction trigger");
+            AddCatalogAction(mechanisms.DropDownItems, "Conveyor belt", "conveyor.png", "", () => _gl.SpawnConveyor(), "Moves dynamic bodies along a lane");
+            AddCatalogAction(mechanisms.DropDownItems, "Piston actuator", "piston.png", "", () => _gl.SpawnPiston(), "Pushes bodies along a short stroke");
+            AddCatalogAction(mechanisms.DropDownItems, "Sliding door", "door.png", "", () => _gl.SpawnSlidingDoor(), "Toggleable sliding blocker");
+
+            var wiring = CatalogCategory("Links & editing");
+            AddCatalogAction(wiring.DropDownItems, "Connect objects", "connect.png", "J", () => _gl.Connect(), "Rigid point link between two bodies");
+            AddCatalogAction(wiring.DropDownItems, "Spring link", "spring.png", "K", () => _gl.Spring(), "Spring connection between bodies");
+            AddCatalogAction(wiring.DropDownItems, "Disconnect object", "disconnect.png", "Delete", () => _gl.Disconnect(), "Remove links from selected object");
+
+            items.Add(basic);
+            items.Add(dummies);
+            items.Add(hazards);
+            items.Add(mechanisms);
+            items.Add(wiring);
+        }
+
+        private ToolStripMenuItem CatalogCategory(string name)
+        {
+            return new ToolStripMenuItem(name)
+            {
+                ForeColor = Color.Gainsboro,
+            };
+        }
+
+        private void AddCatalogAction(ToolStripItemCollection items, string text, string icon, string shortcut, Action action, string description)
+        {
+            var item = new ToolStripMenuItem(text)
+            {
+                ShortcutKeyDisplayString = shortcut,
+                ToolTipText = description,
+            };
+            var img = LoadIcon(icon);
+            if (img != null) item.Image = img;
+            item.Click += (_, _) =>
+            {
+                action();
+                _status.Text = string.IsNullOrWhiteSpace(shortcut)
+                    ? $"Catalog: {text}. Click inside the scene to place/use it."
+                    : $"Catalog: {text} ({shortcut}). Click inside the scene to place/use it.";
+                UpdateToolbarState();
+                _gl.Focus();
+            };
+            items.Add(item);
+        }
+
+        private Image? LoadIcon(string icon)
+        {
+            try
+            {
+                string path = Path.Combine(AppContext.BaseDirectory, "icons", icon);
+                if (!File.Exists(path)) return null;
+                using var img = Image.FromFile(path);
+                return new Bitmap(img);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ShowSpawnCatalog()
+        {
+            if (_catalogContext == null) return;
+            _catalogContext.Show(_gl, new Point(Math.Max(8, _gl.Width / 2 - 140), Math.Max(8, _gl.Height / 2 - 120)));
+            _status.Text = "Spawn catalog opened. Choose an item, then click inside the scene to place/use it.";
+            UpdateToolbarState();
+        }
+
         private ToolStripButton AddToolbarButton(ToolStrip ts, string label, string icon, string shortcut, Action act, bool checkable = false, bool placeOnScene = false)
         {
             var b = new ToolStripButton(label)
@@ -251,21 +889,12 @@ namespace MakarovPhysicsSandbox
                 CheckOnClick = false,
             };
 
-            try
+            var loadedIcon = LoadIcon(icon);
+            if (loadedIcon != null)
             {
-                string path = Path.Combine(AppContext.BaseDirectory, "icons", icon);
-                if (File.Exists(path))
-                {
-                    using var img = Image.FromFile(path);
-                    b.Image = new Bitmap(img);
-                }
-                else
-                {
-                    b.DisplayStyle = ToolStripItemDisplayStyle.Text;
-                    b.Text = shortcut;
-                }
+                b.Image = loadedIcon;
             }
-            catch
+            else
             {
                 b.DisplayStyle = ToolStripItemDisplayStyle.Text;
                 b.Text = shortcut;
@@ -305,8 +934,13 @@ namespace MakarovPhysicsSandbox
             AddItem(editor, "Scale tool", "S", () => _gl.SetEditorTool(EditorToolMode.Scale));
 
             var actions = new ToolStripMenuItem("Actions");
+            AddItem(actions, "Start vertical slice test", "F8", StartVerticalSliceTest);
+            AddItem(actions, "Load vertical slice room", "", () => _gl.LoadVerticalSlice());
+            actions.DropDownItems.Add(new ToolStripSeparator());
             AddItem(actions, "Shoot ball",      "Middle mouse / Space / F", () => _gl.Shoot());
             AddItem(actions, "Explosion",       "E", () => _gl.Detonate());
+            AddItem(actions, "Ignite",          "I", () => _gl.Ignite());
+            AddItem(actions, "Electrify",       "D", () => _gl.Electrify());
             AddItem(actions, "Water",           "V", () => _gl.Water());
             AddItem(actions, "Attractor",       "Z", () => _gl.Attractor());
             AddItem(actions, "Repeller",        "X", () => _gl.Repeller());
@@ -320,6 +954,9 @@ namespace MakarovPhysicsSandbox
 
             var view = new ToolStripMenuItem("View");
             AddItem(view, "Show / hide properties", "F4", TogglePropertiesPanel);
+            AddItem(view, "Show title screen", "F5", ShowStartScreen);
+            AddItem(view, "Show / hide trigger wiring", "W", () => _gl.ToggleTriggerWiring());
+            AddItem(view, "Snap selected trigger target", "F7", () => _gl.SnapSelectedTriggerTargetToNearestMechanism());
             AddItem(view, "Fullscreen", "F11", ToggleFullscreen);
 
             var simulation = new ToolStripMenuItem("Simulation");
@@ -328,8 +965,17 @@ namespace MakarovPhysicsSandbox
             AddItem(simulation, "Single step",  "B", () => _gl.StepOnce());
 
             var scene = new ToolStripMenuItem("Scene");
+            AddItem(scene, "Open spawn catalog", "F6", ShowSpawnCatalog);
             AddItem(scene, "Clear dynamic objects", "C", () => _gl.Clear());
             AddItem(scene, "Reset scene",           "R", () => _gl.Reset());
+            scene.DropDownItems.Add(new ToolStripSeparator());
+            AddItem(scene, "Place explosive barrel", "", () => _gl.SpawnExplosiveBarrel());
+            AddItem(scene, "Place motor hinge", "", () => _gl.SpawnMotor());
+            AddItem(scene, "Place gate", "", () => _gl.SpawnGate());
+            AddItem(scene, "Place timer", "", () => _gl.SpawnTimer());
+            AddItem(scene, "Place conveyor belt", "", () => _gl.SpawnConveyor());
+            AddItem(scene, "Place piston actuator", "", () => _gl.SpawnPiston());
+            AddItem(scene, "Place sliding door", "", () => _gl.SpawnSlidingDoor());
 
             var presets = new ToolStripMenuItem("Presets");
             AddPresetItem(presets, "Domino Run");
@@ -340,6 +986,21 @@ namespace MakarovPhysicsSandbox
             AddPresetItem(presets, "Zero-G Chaos");
             AddPresetItem(presets, "Water Playground");
             AddPresetItem(presets, "Trigger Playground");
+            AddPresetItem(presets, "Android Fire Lab");
+            AddPresetItem(presets, "Electrical Chain Lab");
+            AddPresetItem(presets, "Vehicle Crash Test");
+            AddPresetItem(presets, "Mechanism Chain Reaction");
+            AddPresetItem(presets, "Android Stress Chamber");
+            AddPresetItem(presets, "Android Crash Test Chamber");
+            AddPresetItem(presets, "Motor Gate Timer Lab");
+            AddPresetItem(presets, "Conveyor Chain Lab");
+            AddPresetItem(presets, "Piston Crusher Lab");
+            AddPresetItem(presets, "Explosive Domino");
+            AddPresetItem(presets, "Barrel Pyramid");
+            AddPresetItem(presets, "Electric Floor Trap");
+            AddPresetItem(presets, "Burning Barricade");
+            AddPresetItem(presets, "Wrecking Ball");
+            AddPresetItem(presets, "Ragdoll Bowling");
 
             var challenges = new ToolStripMenuItem("Challenges");
             AddChallengeItem(challenges, "Hit the Target");
@@ -359,7 +1020,9 @@ namespace MakarovPhysicsSandbox
                 ShortcutKeyDisplayString = "H",
             });
 
-            menu.Items.AddRange(new ToolStripItem[] { file, editor, actions, view, simulation, scene, presets, challenges, campaign, help });
+            var catalog = BuildSpawnCatalogMenu();
+
+            menu.Items.AddRange(new ToolStripItem[] { file, editor, actions, view, simulation, scene, catalog, presets, challenges, campaign, help });
             return menu;
         }
 
@@ -506,6 +1169,7 @@ namespace MakarovPhysicsSandbox
             if (_pauseButton != null) _pauseButton.Checked = _gl.IsPaused;
             if (_slowMoButton != null) _slowMoButton.Checked = _gl.IsSlowMo;
             if (_propertiesButton != null) _propertiesButton.Checked = _propertyTabs?.Visible == true;
+            if (_wiringButton != null) _wiringButton.Checked = _gl.ShowTriggerWiring;
 
             var field = _gl.ActiveForceField;
             var pendingField = _gl.PendingForceField;
@@ -517,12 +1181,14 @@ namespace MakarovPhysicsSandbox
             if (_connectButton != null) _connectButton.Checked = pending == PendingSceneActionKind.Connect;
             if (_springButton != null) _springButton.Checked = pending == PendingSceneActionKind.Spring;
             if (_disconnectButton != null) _disconnectButton.Checked = pending == PendingSceneActionKind.Disconnect;
+            UpdateHudState();
         }
 
         private void TogglePropertiesPanel()
         {
             if (_propertyTabs == null) return;
             _propertyTabs.Visible = !_propertyTabs.Visible;
+            if (!_isFullscreen) _propertyTabsVisibleBeforeFullscreen = _propertyTabs.Visible;
             _status.Text = _propertyTabs.Visible ? "Properties panel shown." : "Properties panel hidden. Press F4 to show it again.";
             UpdateToolbarState();
             _gl.Focus();
@@ -535,20 +1201,35 @@ namespace MakarovPhysicsSandbox
                 _previousBorderStyle = FormBorderStyle;
                 _previousBounds = Bounds;
                 _previousWindowState = WindowState;
+                _propertyTabsVisibleBeforeFullscreen = _propertyTabs.Visible;
                 WindowState = FormWindowState.Normal;
                 FormBorderStyle = FormBorderStyle.None;
                 Bounds = Screen.FromControl(this).Bounds;
+                _menu.Visible = false;
+                _tools.Visible = false;
+                _statusStrip.Visible = false;
+                _propertyTabs.Visible = false;
                 _isFullscreen = true;
-                _status.Text = "Fullscreen enabled. Press F11 to return.";
+                SetFullscreenHudVisible(true);
+                _status.Text = "Fullscreen play view enabled. Press F11 to return to the editor layout.";
             }
             else
             {
                 FormBorderStyle = _previousBorderStyle;
                 Bounds = _previousBounds;
                 WindowState = _previousWindowState;
+                _menu.Visible = true;
+                _tools.Visible = true;
+                _statusStrip.Visible = true;
+                _propertyTabs.Visible = _propertyTabsVisibleBeforeFullscreen;
                 _isFullscreen = false;
+                SetFullscreenHudVisible(false);
                 _status.Text = "Fullscreen disabled.";
             }
+            LayoutFullscreenHud();
+            LayoutStartScreen();
+            if (_startOverlay?.Visible == true) ShowStartScreen();
+            UpdateToolbarState();
             _gl.Focus();
         }
 
@@ -565,6 +1246,13 @@ namespace MakarovPhysicsSandbox
             statusStrip.BackColor = Color.FromArgb(31, 34, 40);
             statusStrip.ForeColor = Color.Gainsboro;
             _propertyTabs.BackColor = Color.FromArgb(31, 34, 40);
+            _propertyTabs.ForeColor = Color.Gainsboro;
+            _propertyTabs.Appearance = TabAppearance.Normal;
+            foreach (TabPage page in _propertyTabs.TabPages)
+            {
+                page.BackColor = Color.FromArgb(37, 41, 48);
+                page.ForeColor = Color.Gainsboro;
+            }
             _properties.ApplyPolishedTheme();
             _triggerProperties.ApplyPolishedTheme();
         }

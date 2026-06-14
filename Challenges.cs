@@ -4,7 +4,7 @@ namespace MakarovPhysicsSandbox;
 
 // Lives here (not in the UI file) so the campaign framework can be unit-tested without
 // pulling in WinForms. Core.cs and the challenge builders use the same enum.
-internal enum ChallengeKind { None, HitTarget, TowerDestroyer, BridgeEndurance, Bowling, WaterSorting }
+internal enum ChallengeKind { None, HitTarget, TowerDestroyer, BridgeEndurance, Bowling, WaterSorting, AndroidCrashTest }
 
 /// <summary>The measured outcome of one challenge attempt, fed to a level's star rule.</summary>
 internal readonly struct ChallengeResult
