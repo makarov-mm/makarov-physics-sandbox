@@ -2,8 +2,6 @@
 
 namespace MakarovPhysicsSandbox;
 
-internal enum ShapeType { Sphere, Box, Capsule }
-
 /// <summary>Tiny 3x3 matrix. System.Numerics has no Matrix3x3 and we need one for inertia tensors.</summary>
 internal struct Mat3
 {
@@ -16,6 +14,7 @@ internal struct Mat3
     public static Mat3 FromQuaternion(Quaternion q)
     {
         float x = q.X, y = q.Y, z = q.Z, w = q.W;
+
         return new Mat3
         {
             M00 = 1 - 2 * (y * y + z * z),
@@ -98,20 +97,7 @@ internal struct Mat3
     }
 }
 
-internal static class Quat
-{
-    // System.Numerics' q1*q2 operator multiplies in the opposite order to what
-    // the textbook Hamilton product gives you, and it has bitten us before.
-    // This is the version consistent with Vector3.Transform's  q v q*  sandwich:
-    // Transform(v, Mul(p, c)) == Transform(Transform(v, c), p).
-    public static Quaternion Mul(Quaternion a, Quaternion b)
-    {
-        var av = new Vector3(a.X, a.Y, a.Z);
-        var bv = new Vector3(b.X, b.Y, b.Z);
-        var v = a.W * bv + b.W * av + Vector3.Cross(av, bv);
-        return new Quaternion(v.X, v.Y, v.Z, a.W * b.W - Vector3.Dot(av, bv));
-    }
-}
+
 
 /// <summary>One collision shape of a body, in the body's local frame. Plain bodies have exactly one.</summary>
 internal struct ChildShape
@@ -523,7 +509,7 @@ internal sealed class RigidBody
                 Owner = this,
                 Shape = c.Shape,
                 Position = Position + Vector3.Transform(c.LocalPos, Rotation),
-                Rotation = Quat.Mul(Rotation, c.LocalRot),
+                Rotation = Rotation.Multiply(c.LocalRot),
                 Radius = c.Radius,
                 HalfExtents = c.HalfExtents,
                 HalfHeight = c.HalfHeight,
@@ -1031,7 +1017,8 @@ internal sealed class PhysicsWorld
             var w = b.AngularVelocity + b.BiasAngularVelocity;
             if (w.LengthSquared() > 1e-10f)
             {
-                var dq = Quat.Mul(new Quaternion(w.X, w.Y, w.Z, 0f), b.Rotation);
+                var dq = new Quaternion(w.X, w.Y, w.Z, 0f).Multiply(b.Rotation);
+
                 b.Rotation = Quaternion.Normalize(new Quaternion(
                     b.Rotation.X + dq.X * 0.5f * h,
                     b.Rotation.Y + dq.Y * 0.5f * h,
@@ -1181,7 +1168,7 @@ internal sealed class PhysicsWorld
     private void CreateBreakPiecesForChild(RigidBody source, ChildShape child, List<RigidBody> pieces)
     {
         var childPos = source.Position + Vector3.Transform(child.LocalPos, source.Rotation);
-        var childRot = Quat.Mul(source.Rotation, child.LocalRot);
+        var childRot = source.Rotation.Multiply(child.LocalRot);
         int maxPieces = Math.Clamp(source.BreakPieces, 3, 18);
 
         if (child.Shape == ShapeType.Box)
@@ -2112,7 +2099,7 @@ internal sealed class PhysicsWorld
 
     private static float RaySphere(Vector3 o, Vector3 d, Vector3 center, float r)
     {
-        var m = o - center;
+        Vector3 m = o - center;
         float b = Vector3.Dot(m, d);
         float c = Vector3.Dot(m, m) - r * r;
         float disc = b * b - c;
@@ -2124,10 +2111,10 @@ internal sealed class PhysicsWorld
     private static float RayObb(Vector3 o, Vector3 d, in ShapeProxy box)
     {
         // classic slab test, done in the box's local frame
-        var invRot = Quaternion.Conjugate(box.Rotation);
-        var lo = Vector3.Transform(o - box.Position, invRot);
-        var ld = Vector3.Transform(d, invRot);
-        var h = box.HalfExtents;
+        Quaternion invRot = Quaternion.Conjugate(box.Rotation);
+        Vector3 lo = Vector3.Transform(o - box.Position, invRot);
+        Vector3 ld = Vector3.Transform(d, invRot);
+        Vector3 h = box.HalfExtents;
 
         float tMin = 0f, tMax = float.MaxValue;
         for (int i = 0; i < 3; i++)

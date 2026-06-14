@@ -9,7 +9,7 @@ namespace MakarovPhysicsSandbox;
 
 internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
 
-internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Android, Vehicle, ExplosiveBarrel, Motor, Gate, Timer, Conveyor, Piston, SlidingDoor, Ignite, Electrify }
+internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Android, Vehicle, DroneTarget, BridgeSpan, CatapultLauncher, ExplosiveBarrel, Motor, Gate, Timer, Conveyor, Piston, SlidingDoor, Ignite, Electrify }
 
 
 internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller, StartMotor, OpenGate, StartTimer, StartConveyor, StartPiston, ToggleDoor }
@@ -430,6 +430,9 @@ internal sealed partial class GlPanel : Control
     public void SpawnRagdoll()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ragdoll); Focus(); } }
     public void SpawnAndroid()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Android); Focus(); } }
     public void SpawnVehicle()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Vehicle); Focus(); } }
+    public void SpawnDroneTarget() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.DroneTarget); Focus(); } }
+    public void SpawnBridgeSpan() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.BridgeSpan); Focus(); } }
+    public void SpawnCatapultLauncher() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.CatapultLauncher); Focus(); } }
     public void SpawnExplosiveBarrel() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.ExplosiveBarrel); Focus(); } }
     public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
     public void Electrify()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Electrify); Focus(); } }
@@ -1238,6 +1241,15 @@ internal sealed partial class GlPanel : Control
             case "Catapult":
                 BuildCatapult();
                 break;
+            case "Bridge Jump":
+                BuildBridgeJump();
+                break;
+            case "Catapult Bridge Siege":
+                BuildCatapultBridgeSiege();
+                break;
+            case "Drone Target Range":
+                BuildDroneTargetRange();
+                break;
             case "Newton Cradle":
                 BuildNewtonCradle();
                 break;
@@ -1807,76 +1819,123 @@ internal sealed partial class GlPanel : Control
     private void BuildBridgeTest()
     {
         ResetToEmptyScene();
+        AddBridgeSpan(Vector3.Zero, length: 7.2f, width: 2.1f, plankCount: 9, withCargo: true);
+        StatusUpdated?.Invoke("Preset: Bridge Test — jointed wooden span with cargo loads.");
+    }
 
-        var left = RigidBody.CreateStaticBox(new Vector3(-4.8f, 0.45f, 0f), new Vector3(0.6f, 0.45f, 1.5f));
+    private List<RigidBody> AddBridgeSpan(Vector3 center, float length = 7.2f, float width = 2.1f, int plankCount = 9, bool withCargo = false)
+    {
+        var planks = new List<RigidBody>();
+        float halfLength = length * 0.5f;
+        float supportX = halfLength + 0.55f;
+        float plankStep = length / Math.Max(1, plankCount - 1);
+        float plankHalfX = plankStep * 0.45f;
+        float deckY = center.Y + 1.15f;
+        float supportY = center.Y + 0.45f;
+        float zEdge = width * 0.42f;
+
+        var left = RigidBody.CreateStaticBox(center + new Vector3(-supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f));
         left.Color = new Vector3(0.25f, 0.27f, 0.30f);
         _world.Bodies.Add(left);
-        var right = RigidBody.CreateStaticBox(new Vector3(4.8f, 0.45f, 0f), new Vector3(0.6f, 0.45f, 1.5f));
+        var right = RigidBody.CreateStaticBox(center + new Vector3(supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f));
         right.Color = new Vector3(0.25f, 0.27f, 0.30f);
         _world.Bodies.Add(right);
 
-        var planks = new List<RigidBody>();
-        const int n = 9;
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < plankCount; i++)
         {
-            float x = -3.6f + i * 0.9f;
-            var p = RigidBody.CreateBox(new Vector3(x, 1.15f, 0f), new Vector3(0.43f, 0.09f, 1.05f), density: 0.7f);
+            float x = -halfLength + i * plankStep;
+            var p = WithMaterial(RigidBody.CreateBox(center + new Vector3(x, deckY, 0f), new Vector3(plankHalfX, 0.09f, width * 0.50f), density: 0.72f), MaterialId.Wood);
             p.Friction = 0.85f;
             p.Restitution = 0.05f;
+            p.Breakable = true;
+            p.BreakThreshold = 8.0f;
             AddBody(p, new Vector3(0.55f, 0.34f, 0.17f));
             planks.Add(p);
         }
 
-        // pin both ends to the abutments at both edges so the deck can't twist out
-        const float zEdge = 0.9f;
         foreach (float z in new[] { -zEdge, zEdge })
         {
-            _world.Joints.Add(MakePointJoint(planks[0],  null, new Vector3(-0.43f, 0f, z), new Vector3(-4.05f, 1.15f, z)));
-            _world.Joints.Add(MakePointJoint(planks[^1], null, new Vector3( 0.43f, 0f, z), new Vector3( 4.05f, 1.15f, z)));
+            _world.Joints.Add(MakePointJoint(planks[0], null, new Vector3(-plankHalfX, 0f, z), center + new Vector3(-halfLength - plankHalfX * 0.35f, deckY, z)));
+            _world.Joints.Add(MakePointJoint(planks[^1], null, new Vector3(plankHalfX, 0f, z), center + new Vector3(halfLength + plankHalfX * 0.35f, deckY, z)));
         }
 
-        // rigid hinge links between adjacent planks, two per seam so the deck stays flat.
-        // (Springs let it sag and pull apart under load - that's why it used to collapse.)
         for (int i = 0; i < planks.Count - 1; i++)
             foreach (float z in new[] { -zEdge, zEdge })
-                _world.Joints.Add(MakePointJoint(planks[i], planks[i + 1], new Vector3(0.43f, 0f, z), new Vector3(-0.43f, 0f, z)));
+                _world.Joints.Add(MakePointJoint(planks[i], planks[i + 1], new Vector3(plankHalfX, 0f, z), new Vector3(-plankHalfX, 0f, z)));
 
-        // cargo to carry - lighter than before so a real bridge can actually hold it
-        for (int i = 0; i < 5; i++)
+        if (withCargo)
         {
-            var load = RigidBody.CreateSphere(new Vector3(-2.0f + i * 1.0f, 3.0f + i * 0.25f, 0f), 0.35f, density: 2.4f);
-            AddBody(load, new Vector3(0.25f, 0.45f, 0.85f));
+            for (int i = 0; i < 5; i++)
+            {
+                var load = RigidBody.CreateSphere(center + new Vector3(-2.0f + i * 1.0f, deckY + 1.65f + i * 0.22f, 0f), 0.35f, density: 2.3f);
+                AddBody(load, new Vector3(0.25f, 0.45f, 0.85f));
+            }
         }
+
+        return planks;
+    }
+
+    private void BuildBridgeJump()
+    {
+        ResetToEmptyScene();
+        AddBridgeSpan(Vector3.Zero, length: 8.2f, width: 2.2f, plankCount: 11, withCargo: false);
+
+        var rig = MakeVehicle(new Vector3(-7.8f, 1.35f, 0f), 0.85f);
+        rig.Bodies[0].Velocity = new Vector3(7.5f, 0.0f, 0f);
+        foreach (var b in rig.Bodies)
+        {
+            if (b != rig.Bodies[0]) b.Velocity = new Vector3(7.5f, 0.0f, 0f);
+            _world.Bodies.Add(b);
+        }
+        foreach (var j in rig.Joints) _world.Joints.Add(j);
+
+        SpawnDroneTarget(new Vector3(4.4f, 2.2f, 0.0f), new Vector3(0.2f, 0.85f, 1.0f));
+        StatusUpdated?.Invoke("Preset: Bridge Jump — vehicle crosses a jointed bridge toward a drone target.");
+    }
+
+    private void BuildCatapultBridgeSiege()
+    {
+        ResetToEmptyScene();
+        AddBridgeSpan(new Vector3(1.1f, 0f, 0f), length: 7.5f, width: 2.0f, plankCount: 10, withCargo: false);
+        AddCatapultLauncher(new Vector3(-5.8f, 0f, 0f), new Vector3(8.4f, 4.8f, 0.0f));
+
+        for (int i = 0; i < 4; i++)
+        {
+            var block = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(2.8f + i * 0.35f, 2.05f + i * 0.10f, 0.35f), new Vector3(0.24f), density: 0.9f), threshold: 4.0f), MaterialId.Stone);
+            AddBody(block, new Vector3(0.72f, 0.32f, 0.25f));
+        }
+        SpawnDroneTarget(new Vector3(3.3f, 2.35f, -0.55f), new Vector3(0.25f, 0.90f, 1.0f));
+        StatusUpdated?.Invoke("Preset: Catapult Bridge Siege — catapult shot hits a small bridge-side target setup.");
+    }
+
+    private void BuildDroneTargetRange()
+    {
+        ResetToEmptyScene();
+        AddCatapultLauncher(new Vector3(-5.2f, 0f, 0f), new Vector3(8.2f, 4.4f, 0.0f));
+        SpawnDroneTarget(new Vector3(3.2f, 2.6f, -0.7f), new Vector3(0.25f, 0.85f, 1.0f));
+        SpawnDroneTarget(new Vector3(4.0f, 2.2f, 0.3f), new Vector3(1.0f, 0.76f, 0.28f));
+        SpawnDroneTarget(new Vector3(4.8f, 2.9f, 0.9f), new Vector3(0.8f, 0.35f, 1.0f));
+        for (int i = 0; i < 6; i++)
+        {
+            var block = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(4.3f, 0.28f + i * 0.55f, -1.4f), new Vector3(0.25f), density: 0.8f), threshold: 3.8f), MaterialId.Wood);
+            AddBody(block, new Vector3(0.55f, 0.32f, 0.16f));
+        }
+        StatusUpdated?.Invoke("Preset: Drone Target Range — catapult launcher and several synthetic drone targets.");
     }
 
     private void BuildCatapult()
     {
         ResetToEmptyScene();
+        AddCatapultLauncher(new Vector3(-2.6f, 0f, 0f), new Vector3(7.0f, 3.8f, 0f));
 
-        var baseBox = RigidBody.CreateStaticBox(new Vector3(-2.0f, 0.22f, 0f), new Vector3(1.3f, 0.22f, 0.75f));
-        baseBox.Color = new Vector3(0.28f, 0.24f, 0.20f);
-        _world.Bodies.Add(baseBox);
+        for (int y = 0; y < 4; y++)
+        for (int z = -2; z <= 2; z++)
+        {
+            var block = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(5.2f, 0.26f + y * 0.52f, z * 0.52f), new Vector3(0.24f), density: 0.9f), threshold: 4.4f), MaterialId.Stone);
+            AddBody(block, new Vector3(0.75f, 0.32f, 0.24f));
+        }
 
-        var arm = RigidBody.CreateBox(new Vector3(-2.0f, 0.95f, 0f), new Vector3(2.2f, 0.10f, 0.22f), density: 1.0f);
-        arm.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.25f);
-        arm.Friction = 0.7f;
-        arm.UpdateDerived();
-        AddBody(arm, new Vector3(0.55f, 0.34f, 0.18f));
-
-        _world.Joints.Add(MakePointJoint(arm, null, new Vector3(-0.35f, 0f, 0f), new Vector3(-2.35f, 0.72f, 0f)));
-
-        // counterweight: moderate mass and NO initial velocity. A density-8 weight with a
-        // downward kick on a long single-pivot lever overwhelmed the solver and flung apart.
-        var weight = RigidBody.CreateBox(new Vector3(-4.0f, 1.45f, 0f), new Vector3(0.45f), density: 2.5f);
-        AddBody(weight, new Vector3(0.18f, 0.18f, 0.18f));
-        _world.Joints.Add(MakePointJoint(weight, arm, Vector3.Zero, new Vector3(-1.8f, 0f, 0f)));
-
-        var projectile = RigidBody.CreateSphere(new Vector3(-0.15f, 1.55f, 0f), 0.32f, density: 1.2f);
-        projectile.Restitution = 0.3f;
-        AddBody(projectile, new Vector3(1.0f, 0.82f, 0.22f));
-
-        var target = RigidBody.CreateBox(new Vector3(5.5f, 0.7f, 0f), new Vector3(0.25f, 0.7f, 1.1f), density: 0.65f);
-        AddBody(target, new Vector3(0.8f, 0.2f, 0.2f));
+        StatusUpdated?.Invoke("Preset: Catapult — stable launch demo: projectile arcs into the breakable wall.");
     }
 
     private void BuildNewtonCradle()
@@ -1953,9 +2012,11 @@ internal sealed partial class GlPanel : Control
 
     private void BuildAndroidFireLab()
     {
-        ResetToEmptyScene(water: true);
-        _ragdolls.SpawnAndroid(_world, new Vector3(-2.4f, 0f, 0f));
-        _ragdolls.SpawnAndroid(_world, new Vector3(1.4f, 0f, 1.0f));
+        // Dry fire demo. Water is intentionally off here; the old version flooded the arena,
+        // so androids sank while crates floated and the point of the preset was unreadable.
+        ResetToEmptyScene(water: false);
+        _ragdolls.SpawnAndroid(_world, new Vector3(1.8f, 0f, -0.45f));
+        _ragdolls.SpawnAndroid(_world, new Vector3(2.3f, 0f, 0.65f));
 
         for (int i = 0; i < 6; i++)
         {
@@ -1970,15 +2031,13 @@ internal sealed partial class GlPanel : Control
         AddBody(hotCore, hotCore.Color);
         _heat.Ignite(hotCore);
 
-        var waterLabel = RigidBody.CreateStaticBox(new Vector3(0f, 0.03f, 3.2f), new Vector3(2.0f, 0.03f, 0.8f));
-        waterLabel.Color = new Vector3(0.05f, 0.20f, 0.35f);
-        _world.Bodies.Add(waterLabel);
-        StatusUpdated?.Invoke("Preset: Android Fire Lab — fire spreads, water wets/extinguishes, android bones burn differently from flesh.");
+        StatusUpdated?.Invoke("Preset: Android Fire Lab — dry demo: fire spreads through crates toward standing android targets.");
     }
 
     private void BuildElectricalChainLab()
     {
-        ResetToEmptyScene(water: true);
+        // Dry electrical demo. The previous flooded version mostly demonstrated buoyancy, not electricity.
+        ResetToEmptyScene(water: false);
         _ragdolls.SpawnAndroid(_world, new Vector3(3.0f, 0f, 0f));
 
         RigidBody? first = null;
@@ -1998,7 +2057,7 @@ internal sealed partial class GlPanel : Control
         }
 
         if (first != null) _electricity.Electrify(first, 1.4f);
-        StatusUpdated?.Invoke("Preset: Electrical Chain Lab — metal and wet objects carry charge; androids take shock damage.");
+        StatusUpdated?.Invoke("Preset: Electrical Chain Lab — charged metal nodes arc toward the android; wet crates are conductive pickups, not a flooded pool.");
     }
 
     private void BuildVehicleCrashTest()
@@ -2011,10 +2070,10 @@ internal sealed partial class GlPanel : Control
         ramp.Color = new Vector3(0.38f, 0.40f, 0.45f);
         _world.Bodies.Add(ramp);
 
-        var rig = MakeVehicle(new Vector3(-6.7f, 3.0f, 0f), 1.0f);
+        var rig = MakeVehicle(new Vector3(-6.7f, 0.72f, 0f), 1.0f);
         foreach (var b in rig.Bodies)
         {
-            b.Velocity = new Vector3(7.0f, 0f, 0f);
+            b.Velocity = new Vector3(5.2f, 0f, 0f);
             _world.Bodies.Add(b);
         }
         foreach (var j in rig.Joints) _world.Joints.Add(j);
@@ -2080,7 +2139,8 @@ internal sealed partial class GlPanel : Control
 
     private void BuildAndroidStressChamber()
     {
-        ResetToEmptyScene(water: true);
+        // Compact dry stress test. Water stays off; this should read as impact/fire/electricity/explosion, not a pool.
+        ResetToEmptyScene(water: false);
 
         // A compact trailer/debug chamber for the current M1.5 loop:
         // impact + fire + water + electricity + explosive material + android joint tearing.
@@ -2107,10 +2167,6 @@ internal sealed partial class GlPanel : Control
             AddBody(conductor, new Vector3(0.70f, 0.76f, 0.84f));
             if (i == 0) _electricity.Electrify(conductor, 1.5f);
         }
-
-        var waterMarker = RigidBody.CreateStaticBox(new Vector3(0f, 0.03f, 3.25f), new Vector3(2.2f, 0.03f, 0.9f));
-        waterMarker.Color = new Vector3(0.05f, 0.20f, 0.35f);
-        _world.Bodies.Add(waterMarker);
 
         _triggers.Add(new SceneTrigger
         {
@@ -2340,7 +2396,7 @@ internal sealed partial class GlPanel : Control
     private void SpawnVehicleAtAim()
     {
         EvictIfFull();
-        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 1.0f, 0f);
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.72f, 0f);
         var vehicle = MakeVehicle(p, 1.0f);
         foreach (var b in vehicle.Bodies) _world.Bodies.Add(b);
         foreach (var j in vehicle.Joints) _world.Joints.Add(j);
@@ -2363,6 +2419,78 @@ internal sealed partial class GlPanel : Control
         StatusUpdated?.Invoke("Placed explosive barrel. It can detonate from fire, shock or heavy impact.");
     }
 
+    private void SpawnBridgeSpanAtAim()
+    {
+        EvictIfFull();
+        var p = _aimValid ? _aimPoint : Vector3.Zero;
+        AddBridgeSpan(p, length: 7.2f, width: 2.0f, plankCount: 9, withCargo: false);
+        StatusUpdated?.Invoke("Placed bridge span. It is a jointed wooden deck with anchored supports.");
+    }
+
+    private void SpawnCatapultLauncherAtAim()
+    {
+        EvictIfFull();
+        var p = _aimValid ? _aimPoint : Vector3.Zero;
+        AddCatapultLauncher(p, new Vector3(7.5f, 4.2f, 0f));
+        StatusUpdated?.Invoke("Placed catapult launcher. It immediately fires a stone projectile along its test arc.");
+    }
+
+    private void SpawnDroneTargetAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 1.15f, 0f);
+        SpawnDroneTarget(p, new Vector3(0.25f, 0.85f, 1.0f));
+        StatusUpdated?.Invoke("Placed synthetic drone target.");
+    }
+
+    private RigidBody SpawnDroneTarget(Vector3 p, Vector3 color)
+    {
+        var drone = RigidBody.CreateCompound(p, [
+            ChildShape.Box(new Vector3(0.32f, 0.12f, 0.24f)),
+            ChildShape.Box(new Vector3(0.55f, 0.035f, 0.055f)),
+            ChildShape.Box(new Vector3(0.055f, 0.035f, 0.55f)),
+            ChildShape.Sphere(0.13f, new Vector3(-0.52f, 0f, -0.52f)),
+            ChildShape.Sphere(0.13f, new Vector3(-0.52f, 0f,  0.52f)),
+            ChildShape.Sphere(0.13f, new Vector3( 0.52f, 0f, -0.52f)),
+            ChildShape.Sphere(0.13f, new Vector3( 0.52f, 0f,  0.52f)),
+        ], density: 0.55f);
+        WithMaterial(drone, MaterialId.Synthetic);
+        drone.Tag = "DroneTarget";
+        drone.Color = color;
+        drone.Friction = 0.42f;
+        drone.Restitution = 0.28f;
+        drone.Breakable = true;
+        drone.BreakThreshold = 3.2f;
+        drone.Flammability = MathF.Max(drone.Flammability, 0.35f);
+        drone.Conductivity = MathF.Max(drone.Conductivity, 0.65f);
+        _world.Bodies.Add(drone);
+        return drone;
+    }
+
+    private void AddCatapultLauncher(Vector3 p, Vector3 projectileVelocity)
+    {
+        var baseBox = RigidBody.CreateStaticBox(p + new Vector3(0f, 0.20f, 0f), new Vector3(1.35f, 0.20f, 0.62f));
+        baseBox.Color = new Vector3(0.28f, 0.24f, 0.20f);
+        _world.Bodies.Add(baseBox);
+
+        var arm = RigidBody.CreateStaticBox(p + new Vector3(0.65f, 0.82f, 0f), new Vector3(1.85f, 0.08f, 0.18f));
+        arm.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.18f);
+        arm.UpdateDerived();
+        arm.Color = new Vector3(0.55f, 0.34f, 0.18f);
+        _world.Bodies.Add(arm);
+
+        var cup = RigidBody.CreateStaticBox(p + new Vector3(2.35f, 1.10f, 0f), new Vector3(0.38f, 0.06f, 0.32f));
+        cup.Rotation = arm.Rotation;
+        cup.UpdateDerived();
+        cup.Color = new Vector3(0.48f, 0.30f, 0.16f);
+        _world.Bodies.Add(cup);
+
+        var projectile = WithMaterial(RigidBody.CreateSphere(p + new Vector3(2.05f, 1.38f, 0f), 0.32f, density: 1.4f), MaterialId.Stone);
+        projectile.Restitution = 0.35f;
+        projectile.Velocity = projectileVelocity;
+        AddBody(projectile, new Vector3(1.0f, 0.82f, 0.22f));
+    }
+
     private sealed class VehicleRig
     {
         public readonly List<RigidBody> Bodies = new(5);
@@ -2380,23 +2508,25 @@ internal sealed partial class GlPanel : Control
         chassis.Color = new Vector3(1.0f, 1.0f, 1.0f);
         chassis.Tag = "VehicleChassis";
         chassis.Friction = 0.55f;
-        chassis.Restitution = 0.18f;
-        chassis.Breakable = true;
-        chassis.BreakThreshold = 8.5f;
+        chassis.Restitution = 0.12f;
+        // Keep the vehicle readable by default. Later vehicle-damage work can detach/break parts deliberately;
+        // the previous version could fracture immediately because wheels overlapped the chassis.
+        chassis.Breakable = false;
+        chassis.BreakThreshold = 12.0f;
         chassis.Flammability = 0.45f;
         chassis.Conductivity = 0.25f;
         rig.Bodies.Add(chassis);
 
         Vector3[] offsets =
         {
-            new(-0.62f * k, -0.24f * k,  0.48f * k),
-            new( 0.62f * k, -0.24f * k,  0.48f * k),
-            new(-0.62f * k, -0.24f * k, -0.48f * k),
-            new( 0.62f * k, -0.24f * k, -0.48f * k),
+            new(-0.68f * k, -0.46f * k,  0.58f * k),
+            new( 0.68f * k, -0.46f * k,  0.58f * k),
+            new(-0.68f * k, -0.46f * k, -0.58f * k),
+            new( 0.68f * k, -0.46f * k, -0.58f * k),
         };
         foreach (var off in offsets)
         {
-            var wheel = RigidBody.CreateSphere(pos + off, 0.25f * k, density: 1.4f);
+            var wheel = RigidBody.CreateSphere(pos + off, 0.22f * k, density: 1.1f);
             WithMaterial(wheel, MaterialId.Rubber);
             wheel.Color = new Vector3(1.0f, 1.0f, 1.0f);
             wheel.Tag = "VehicleWheel";
@@ -2553,6 +2683,15 @@ internal sealed partial class GlPanel : Control
             case PendingSceneActionKind.Vehicle:
                 SpawnVehicleAtAim();
                 break;
+            case PendingSceneActionKind.DroneTarget:
+                SpawnDroneTargetAtAim();
+                break;
+            case PendingSceneActionKind.BridgeSpan:
+                SpawnBridgeSpanAtAim();
+                break;
+            case PendingSceneActionKind.CatapultLauncher:
+                SpawnCatapultLauncherAtAim();
+                break;
             case PendingSceneActionKind.ExplosiveBarrel:
                 SpawnExplosiveBarrelAtAim();
                 break;
@@ -2613,6 +2752,9 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.Ragdoll => "ragdoll",
         PendingSceneActionKind.Android => "android dummy",
         PendingSceneActionKind.Vehicle => "vehicle",
+        PendingSceneActionKind.DroneTarget => "drone target",
+        PendingSceneActionKind.BridgeSpan => "bridge span",
+        PendingSceneActionKind.CatapultLauncher => "catapult launcher",
         PendingSceneActionKind.ExplosiveBarrel => "explosive barrel",
         PendingSceneActionKind.Motor => "motor hinge",
         PendingSceneActionKind.Gate => "gate",
@@ -4061,9 +4203,9 @@ internal sealed partial class GlPanel : Control
 
         GL.Viewport(0, 0, _width, _height);
         float tScene = (float)_sw.Elapsed.TotalSeconds;
-        float ambience = 0.5f + 0.5f * MathF.Sin(tScene * 0.55f);
-        float flash = Math.Clamp(_impactFlash, 0f, 0.30f);
-        GL.ClearColor(0.07f + flash * 0.35f, 0.09f + flash * 0.20f, 0.12f + ambience * 0.02f + flash * 0.10f, 1f);
+        // Keep the clear colour stable. The previous ambient/impact modulation looked like background flicker.
+        // Impact feedback is now handled by particles/beams, not by flashing the whole frame.
+        GL.ClearColor(0.07f, 0.09f, 0.12f, 1f);
         GL.Clear(GL.COLOR_BUFFER_BIT | GL.DEPTH_BUFFER_BIT);
 
         GL.UseProgram(_mainProgram);
@@ -4087,7 +4229,7 @@ internal sealed partial class GlPanel : Control
         // floor
         GL.BindTexture(GL.TEXTURE_2D, _texFloor);
         GL.Uniform1(_uUvScale, 20f);
-        GL.Uniform3(_uColor, 0.60f + ambience * 0.03f, 0.62f + ambience * 0.03f, 0.67f + ambience * 0.04f);
+        GL.Uniform3(_uColor, 0.62f, 0.64f, 0.68f);
         GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(40f, 1f, 40f)));
         _planeMesh.Draw();
         GL.Uniform1(_uWaterWaveAmp, 0f);

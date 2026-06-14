@@ -85,7 +85,7 @@ internal sealed class Ragdoll
     public bool Alive = true;
 
     // ---- tunables (shared defaults; exposed so they can be tweaked live while tuning feel) ----
-    public const float UprightStrength = 0.75f;   // pelvis self-righting while alive (0 = no balancing)
+    public const float UprightStrength = 2.2f;    // pelvis self-righting while alive (0 = no balancing)
 
     public Vector3 Center => Pelvis.Body.Position;
 
@@ -117,9 +117,9 @@ internal sealed class RagdollSystem
     // ---- muscle tuning ----
     private const float ChildShare = 0.85f;    // reaction split: child moves more than the parent
     private const float ParentShare = 0.15f;
-    private const float MaxDeltaW = 4.8f;      // clamp per-bone angular-velocity change per step (rad/s)
-    private const float MuscleStiffnessScale = 0.9f; // global convergence multiplier (holds pose when dragged)
-    private const float MuscleStrengthScale = 0.8f;  // global proportional-gain multiplier
+    private const float MaxDeltaW = 7.5f;      // clamp per-bone angular-velocity change per step (rad/s)
+    private const float MuscleStiffnessScale = 1.35f; // global convergence multiplier (stand-assist pose hold)
+    private const float MuscleStrengthScale = 1.25f;  // global proportional-gain multiplier
 
     // Android damage gameplay: joints are not just decorative rods. Hurt, burning or shocked
     // limbs become easier to detach, which gives the sandbox the expected crash-test feel.
@@ -173,6 +173,7 @@ internal sealed class RagdollSystem
             //    This is the cheap stand-in for real balance; it is intentionally weak.
             if (Ragdoll.UprightStrength > 0f)
                 DriveUpright(rag.Pelvis.Body, dt);
+            DriveStandingAssist(rag, dt);
 
             // 5) Gameplay joint tearing. A healthy android survives normal bumps, but a damaged,
             //    burning or shocked limb can detach under sudden relative motion.
@@ -329,10 +330,10 @@ internal sealed class RagdollSystem
 
         // Target world orientation of the child = parentWorld composed with the rest offset.
         // Composition matches the engine's own convention (RefreshProxies uses Quat.Mul(Rotation, local)).
-        var targetChild = Quat.Mul(parent.Rotation, m.RestRelative);
+        var targetChild = parent.Rotation.Multiply(m.RestRelative);
 
         // World-space rotation that carries the current child orientation onto the target.
-        var qErr = Quat.Mul(targetChild, Quaternion.Conjugate(child.Rotation));
+        var qErr = targetChild.Multiply(Quaternion.Conjugate(child.Rotation));
         var rotVec = RotationVector(qErr);                  // axis * angle, in world space
 
         // Desired relative angular velocity that closes the error, damped toward the parent's.
@@ -346,6 +347,35 @@ internal sealed class RagdollSystem
 
         if (!child.IsStatic) child.AngularVelocity += dW * ChildShare;
         if (!parent.IsStatic) parent.AngularVelocity -= dW * ParentShare;
+    }
+
+    private static void DriveStandingAssist(Ragdoll rag, float dt)
+    {
+        if (dt <= 0f || !rag.Alive) return;
+
+        // This is not full walking balance. It is a deliberately small stabiliser that makes a freshly spawned
+        // android stand like a crash-test dummy instead of immediately folding into a loose ragdoll.
+        var pelvis = rag.Pelvis.Body;
+        Vector3 footSum = Vector3.Zero;
+        int footCount = 0;
+        foreach (var bone in rag.Bones)
+        {
+            if (!bone.Name.StartsWith("legLower", StringComparison.Ordinal)) continue;
+            footSum += bone.Body.Position;
+            footCount++;
+        }
+        if (footCount == 0) return;
+
+        var feet = footSum / footCount;
+        var lateralError = new Vector3(feet.X - pelvis.Position.X, 0f, feet.Z - pelvis.Position.Z);
+        float maxError = 0.55f;
+        if (lateralError.LengthSquared() > maxError * maxError)
+            lateralError = Vector3.Normalize(lateralError) * maxError;
+
+        // Pull the pelvis back over the lower legs and damp excessive spin. Hard hits still overpower this.
+        pelvis.Velocity += lateralError * Math.Clamp(5.5f * dt, 0f, 0.22f);
+        pelvis.AngularVelocity *= MathF.Pow(0.55f, dt);
+        pelvis.Wake();
     }
 
     private static void DriveUpright(RigidBody pelvis, float dt)
@@ -417,7 +447,8 @@ internal sealed class RagdollSystem
     /// add it (bodies + joints) to the world.</summary>
     public Ragdoll SpawnAndroid(PhysicsWorld world, Vector3 footPos)
     {
-        var rag = Spawn(world, footPos);
+        Ragdoll rag = Spawn(world, footPos);
+
         foreach (var bone in rag.Bones)
         {
             bone.Android = true;
@@ -435,7 +466,7 @@ internal sealed class RagdollSystem
     public Ragdoll Spawn(PhysicsWorld world, Vector3 footPos)
     {
         var rag = new Ragdoll();
-        var pelvisCenter = footPos + new Vector3(0f, 1.0f, 0f); // ~1m up so the feet reach the ground
+        Vector3 pelvisCenter = footPos + new Vector3(0f, 1.0f, 0f); // ~1m up so the feet reach the ground
 
         // ---- bone layout, expressed relative to the pelvis centre (X right, Y up, Z fwd) ----
         // half-extents pick a roughly 1.5 m figure; tuned by eye, easy to change later.
@@ -476,17 +507,15 @@ internal sealed class RagdollSystem
 
     // ---- builders ----
 
-    private static RagdollBone Box(Ragdoll rag, PhysicsWorld world, string name, Vector3 center, Vector3 half,
-                                   bool vital, float hp)
+    private static RagdollBone Box(Ragdoll rag, PhysicsWorld world, string name, Vector3 center, Vector3 half, bool vital, float hp)
     {
-        var body = RigidBody.CreateBox(center, half, density: BoneDensity);
+        RigidBody body = RigidBody.CreateBox(center, half, density: BoneDensity);
         return Register(rag, world, body, name, vital, hp);
     }
 
-    private static RagdollBone Sphere(Ragdoll rag, PhysicsWorld world, string name, Vector3 center, float radius,
-                                      bool vital, float hp)
+    private static RagdollBone Sphere(Ragdoll rag, PhysicsWorld world, string name, Vector3 center, float radius, bool vital, float hp)
     {
-        var body = RigidBody.CreateSphere(center, radius, density: BoneDensity);
+        RigidBody body = RigidBody.CreateSphere(center, radius, density: BoneDensity);
         return Register(rag, world, body, name, vital, hp);
     }
 
@@ -507,8 +536,7 @@ internal sealed class RagdollSystem
         return bone;
     }
 
-    private static void Link(Ragdoll rag, PhysicsWorld world, RagdollBone parent, RagdollBone child,
-                             Vector3 jointWorld, float stiffness, float strength)
+    private static void Link(Ragdoll rag, PhysicsWorld world, RagdollBone parent, RagdollBone child, Vector3 jointWorld, float stiffness, float strength)
     {
         // Bodies spawn at identity rotation, so a local anchor is just (jointWorld - bodyCenter).
         var joint = new Joint
@@ -519,11 +547,13 @@ internal sealed class RagdollSystem
             LocalA = jointWorld - parent.Body.Position,
             LocalB = jointWorld - child.Body.Position,
         };
+
         world.Joints.Add(joint);
 
         // Rest offset captured from the spawn pose (identity rotations -> identity, but computed
         // generically so a future posed spawn still works).
-        var rest = Quat.Mul(Quaternion.Conjugate(parent.Body.Rotation), child.Body.Rotation);
+        Quaternion rest = Quaternion.Conjugate(parent.Body.Rotation).Multiply(child.Body.Rotation);
+
         rag.Muscles.Add(new PoseMuscle
         {
             Parent = parent.Body,

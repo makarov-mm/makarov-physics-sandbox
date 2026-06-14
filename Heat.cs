@@ -92,7 +92,7 @@ internal sealed class HeatSystem
 
                 b.Temperature = MathF.Max(b.Temperature, BurnTemperature * 0.85f);
 
-                float fuel = _fuel.TryGetValue(b, out var f) ? f : BaseFuel;
+                float fuel = _fuel.GetValueOrDefault(b, BaseFuel);
                 fuel -= dt;
                 if (fuel <= 0f)
                 {
@@ -103,7 +103,7 @@ internal sealed class HeatSystem
                 b.Wake();
 
                 // fire damages a burning ragdoll bone (sever-capable: fire can kill).
-                if (b.Tag is RagdollBone bone && !bone.Severed)
+                if (b.Tag is RagdollBone { Severed: false } bone)
                 {
                     bone.Burning = true;
                     ragdolls.DamageBone(bone, FireDamagePerSecond * dt, world);
@@ -127,8 +127,10 @@ internal sealed class HeatSystem
                     b.Temperature = Ambient + (b.Temperature - Ambient) / (1f + CoolRate * dt);
 
                 // 3) Auto-ignite if hot enough and flammable.
-                if (b.Temperature >= IgnitionPoint && !b.IsStatic && EffectiveFlammability(b) > 0.02f)
-                    (toIgnite ??= new List<RigidBody>()).Add(b);
+                if (b is { Temperature: >= IgnitionPoint, IsStatic: false } && EffectiveFlammability(b) > 0.02f)
+                {
+                    (toIgnite ??= []).Add(b);
+                }
             }
         }
 
@@ -139,7 +141,12 @@ internal sealed class HeatSystem
     private void Extinguish(RigidBody b)
     {
         b.Burning = false;
-        if (b.Tag is RagdollBone bone) bone.Burning = false;
+
+        if (b.Tag is RagdollBone bone)
+        {
+            bone.Burning = false;
+        }
+
         b.Temperature = MathF.Min(b.Temperature, 90f);
         _fuel.Remove(b);
         b.Wake();
@@ -148,7 +155,12 @@ internal sealed class HeatSystem
     private void BurnOut(RigidBody b)
     {
         b.Burning = false;
-        if (b.Tag is RagdollBone bone) bone.Burning = false;
+
+        if (b.Tag is RagdollBone bone)
+        {
+            bone.Burning = false;
+        }
+
         b.Flammability = 0f;          // charred: won't reignite
         b.Temperature = 220f;         // stays warm a moment, then cools via the normal path
         _fuel.Remove(b);
@@ -190,9 +202,21 @@ internal static class HeatDictExtensions
     public static void RemoveAll(this Dictionary<RigidBody, float> fuel, PhysicsWorld world)
     {
         List<RigidBody>? dead = null;
-        foreach (var key in fuel.Keys)
-            if (!world.Bodies.Contains(key)) (dead ??= new List<RigidBody>()).Add(key);
-        if (dead != null)
-            foreach (var k in dead) fuel.Remove(k);
+
+        foreach (RigidBody key in fuel.Keys)
+        {
+            if (!world.Bodies.Contains(key))
+            {
+                (dead ??= []).Add(key);
+            }
+        }
+
+        if (dead is not null)
+        {
+            foreach (RigidBody k in dead)
+            {
+                fuel.Remove(k);
+            }
+        }
     }
 }

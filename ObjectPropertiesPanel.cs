@@ -1,6 +1,4 @@
-using System.Drawing;
 using System.Numerics;
-using System.Windows.Forms;
 
 namespace MakarovPhysicsSandbox;
 
@@ -252,7 +250,14 @@ internal sealed class ObjectPropertiesPanel : Panel
 
     private static void AddHeader(TableLayoutPanel t, string text)
     {
-        var l = new Label { Text = text, Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 10, 0, 2) };
+        var l = new Label
+        {
+            Text = text, 
+            Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), 
+            AutoSize = true, 
+            Margin = new Padding(0, 10, 0, 2)
+        };
+
         t.Controls.Add(l, 0, t.RowCount);
         t.SetColumnSpan(l, 2);
         t.RowCount++;

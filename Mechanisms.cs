@@ -4,9 +4,6 @@ namespace MakarovPhysicsSandbox;
 
 internal sealed partial class GlPanel
 {
-    private enum MechanismKind { Motor, Gate, Timer, Conveyor, Piston, SlidingDoor }
-    private enum TimerMechanismAction { OpenGate, StartMotor, StartConveyor, StartPiston, ToggleDoor, Explosion, Chain }
-
     private sealed class SceneMechanism
     {
         public string Id = SceneId.New("mechanism");
@@ -16,6 +13,7 @@ internal sealed partial class GlPanel
             get => string.IsNullOrWhiteSpace(Name) ? Id : Name;
             set => Name = value;
         }
+
         public MechanismKind Kind;
         public Vector3 Position;
         public bool Enabled = true;
@@ -177,8 +175,8 @@ internal sealed partial class GlPanel
 
     private void AddGateAtAim()
     {
-        var closed = _aimPoint + new Vector3(0, 1.0f, 0);
-        var body = RigidBody.CreateStaticBox(closed, new Vector3(0.18f, 1.0f, 1.35f));
+        Vector3 closed = _aimPoint + new Vector3(0, 1.0f, 0);
+        RigidBody body = RigidBody.CreateStaticBox(closed, new Vector3(0.18f, 1.0f, 1.35f));
         body.UserObject = true;
         body.MaterialId = MaterialId.Metal;
         body.Color = new Vector3(0.36f, 0.48f, 0.58f);
@@ -201,7 +199,8 @@ internal sealed partial class GlPanel
 
     private void AddTimerAtAim()
     {
-        var p = _aimPoint + new Vector3(0, 0.12f, 0);
+        Vector3 p = _aimPoint + new Vector3(0, 0.12f, 0);
+
         _mechanisms.Add(new SceneMechanism
         {
             Name = "Timer",
@@ -212,13 +211,15 @@ internal sealed partial class GlPanel
             Remaining = 1.5f,
             TimerAction = TimerMechanismAction.Chain,
         });
+
         StatusUpdated?.Invoke("Placed timer. A StartTimer trigger will count down, then open gates and start motors.");
     }
 
     private void AddConveyorAtAim()
     {
-        var p = _aimPoint + new Vector3(0, 0.14f, 0);
-        var body = RigidBody.CreateStaticBox(p, new Vector3(2.1f, 0.08f, 0.78f));
+        Vector3 p = _aimPoint + new Vector3(0, 0.14f, 0);
+        RigidBody body = RigidBody.CreateStaticBox(p, new Vector3(2.1f, 0.08f, 0.78f));
+
         body.UserObject = true;
         body.MaterialId = MaterialId.Rubber;
         body.Color = new Vector3(0.08f, 0.10f, 0.12f);
@@ -236,14 +237,16 @@ internal sealed partial class GlPanel
             Strength = 2.4f,
             MotorAxis = Vector3.UnitX,
         });
+
         StatusUpdated?.Invoke("Placed conveyor belt. It pushes dynamic objects along its arrow direction.");
     }
 
 
     private void AddPistonAtAim()
     {
-        var closed = _aimPoint + new Vector3(0, 0.55f, 0);
-        var body = RigidBody.CreateStaticBox(closed, new Vector3(0.70f, 0.26f, 0.58f));
+        Vector3 closed = _aimPoint + new Vector3(0, 0.55f, 0);
+        RigidBody body = RigidBody.CreateStaticBox(closed, new Vector3(0.70f, 0.26f, 0.58f));
+
         body.UserObject = true;
         body.MaterialId = MaterialId.Metal;
         body.Color = new Vector3(0.74f, 0.24f, 0.18f);
@@ -265,6 +268,7 @@ internal sealed partial class GlPanel
             Active = false,
             MotorAxis = Vector3.UnitX,
         });
+
         StatusUpdated?.Invoke("Placed piston actuator. Trigger it with StartPiston to push objects along its stroke.");
     }
 
@@ -291,6 +295,7 @@ internal sealed partial class GlPanel
             Active = false,
             MotorAxis = Vector3.UnitZ,
         });
+
         StatusUpdated?.Invoke("Placed sliding door. Trigger it with ToggleDoor to open/close the passage.");
     }
 
@@ -302,7 +307,7 @@ internal sealed partial class GlPanel
         {
             if (!m.Enabled) continue;
 
-            if (m.Kind == MechanismKind.Gate && m.Body != null)
+            if (m is { Kind: MechanismKind.Gate, Body: not null })
             {
                 float target = m.Active ? 1f : 0f;
                 float step = MathF.Max(0.05f, m.OpenSpeed) * dt;
@@ -876,8 +881,8 @@ internal sealed partial class GlPanel
         ramp.Color = new Vector3(0.40f, 0.42f, 0.48f);
         _world.Bodies.Add(ramp);
 
-        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-8.2f, 2.7f, 0f), 0.34f, density: 3.2f), MaterialId.Metal);
-        ball.Velocity = new Vector3(3.5f, 0f, 0f);
+        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-6.6f, 1.55f, 0f), 0.36f, density: 3.4f), MaterialId.Metal);
+        ball.Velocity = new Vector3(5.8f, 0f, 0f);
         AddBody(ball, new Vector3(0.92f, 0.78f, 0.25f));
 
         // Gate blocks the lane until timer opens it.
@@ -909,16 +914,23 @@ internal sealed partial class GlPanel
             timer.TimerAction = TimerMechanismAction.Chain;
         }
 
-        _triggers.Add(new SceneTrigger
+        var startPlate = new SceneTrigger
         {
             Name = "Start timer plate",
-            Position = new Vector3(-4.0f, 0.08f, 0f),
-            HalfExtents = new Vector3(0.78f, 0.06f, 0.82f),
+            Position = new Vector3(-4.7f, 0.08f, 0f),
+            HalfExtents = new Vector3(0.95f, 0.06f, 0.82f),
             Action = TriggerActionKind.StartTimer,
-            TargetPosition = new Vector3(-3.4f, 0.10f, 0f),
-            Radius = 4.0f,
+            TargetPosition = timer?.Position ?? new Vector3(-3.4f, 0.10f, 0f),
+            Radius = 6.0f,
             OneShot = true,
-        });
+        };
+        if (timer != null)
+            startPlate.Outputs.Add(new TriggerOutput { TargetId = timer.Id, TargetName = timer.DisplayName, Action = TriggerActionKind.StartTimer, Radius = 7.0f, Strength = 1.0f, Enabled = true });
+        if (gate != null)
+            startPlate.Outputs.Add(new TriggerOutput { TargetId = gate.Id, TargetName = gate.DisplayName, Action = TriggerActionKind.OpenGate, Delay = 1.30f, Radius = 7.0f, Strength = 1.0f, Enabled = true });
+        if (motor != null)
+            startPlate.Outputs.Add(new TriggerOutput { TargetId = motor.Id, TargetName = motor.DisplayName, Action = TriggerActionKind.StartMotor, Delay = 1.45f, Radius = 7.0f, Strength = 1.0f, Enabled = true });
+        _triggers.Add(startPlate);
 
         _triggers.Add(new SceneTrigger
         {
@@ -976,19 +988,26 @@ internal sealed partial class GlPanel
             timer.Radius = 8.0f;
         }
 
-        _triggers.Add(new SceneTrigger
+        var startConveyorPlate = new SceneTrigger
         {
             Name = "Start conveyor sequence",
             Position = new Vector3(-5.2f, 0.08f, 0f),
-            HalfExtents = new Vector3(0.70f, 0.06f, 0.75f),
+            HalfExtents = new Vector3(0.85f, 0.06f, 0.75f),
             Action = TriggerActionKind.StartTimer,
-            TargetPosition = new Vector3(-4.2f, 0.10f, 0f),
-            Radius = 5.0f,
+            TargetPosition = timer?.Position ?? new Vector3(-4.2f, 0.10f, 0f),
+            Radius = 6.0f,
             OneShot = true,
-        });
+        };
+        if (timer != null)
+            startConveyorPlate.Outputs.Add(new TriggerOutput { TargetId = timer.Id, TargetName = timer.DisplayName, Action = TriggerActionKind.StartTimer, Radius = 7.0f, Strength = 1.0f, Enabled = true });
+        if (gate != null)
+            startConveyorPlate.Outputs.Add(new TriggerOutput { TargetId = gate.Id, TargetName = gate.DisplayName, Action = TriggerActionKind.OpenGate, Delay = 1.05f, Radius = 7.0f, Strength = 1.0f, Enabled = true });
+        if (conveyor != null)
+            startConveyorPlate.Outputs.Add(new TriggerOutput { TargetId = conveyor.Id, TargetName = conveyor.DisplayName, Action = TriggerActionKind.StartConveyor, Delay = 1.15f, Radius = 7.0f, Strength = 1.0f, Enabled = true });
+        _triggers.Add(startConveyorPlate);
 
-        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-6.5f, 1.25f, 0f), 0.32f, density: 3.0f), MaterialId.Metal);
-        ball.Velocity = new Vector3(2.4f, 0f, 0f);
+        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-6.2f, 0.72f, 0f), 0.32f, density: 3.0f), MaterialId.Metal);
+        ball.Velocity = new Vector3(4.2f, 0f, 0f);
         AddBody(ball, new Vector3(0.95f, 0.86f, 0.36f));
 
         for (int i = 0; i < 4; i++)

@@ -216,5 +216,4 @@ internal sealed class Mesh
 
         return new Mesh(verts.ToArray(), idx.ToArray());
     }
-
 }

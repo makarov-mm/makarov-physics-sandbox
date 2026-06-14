@@ -18,6 +18,9 @@ namespace MakarovPhysicsSandbox
         private Label _hudObjective = null!;
         private Label _hudHotbar = null!;
         private Label _hudHints = null!;
+        private Panel _playerControls = null!;
+        private FlowLayoutPanel _playerControlList = null!;
+        private Label _playerControlsTitle = null!;
         private bool _propertyTabsVisibleBeforeFullscreen = true;
         private ToolStripButton? _waterButton;
         private ToolStripButton? _gravityButton;
@@ -125,6 +128,7 @@ namespace MakarovPhysicsSandbox
             _statusStrip.Items.Add(_status);
 
             BuildFullscreenHud();
+            BuildPlayerControls();
             BuildStartScreen();
             BuildResultOverlay();
             _catalogContext = BuildSpawnCatalogContext();
@@ -139,21 +143,25 @@ namespace MakarovPhysicsSandbox
             Controls.Add(_menu);
             Controls.Add(_hudBottom);
             Controls.Add(_hudTop);
+            Controls.Add(_playerControls);
             Controls.Add(_startOverlay);
             Controls.Add(_resultOverlay);
             _hudTop.BringToFront();
             _hudBottom.BringToFront();
+            _playerControls.BringToFront();
             _startOverlay.BringToFront();
             _resultOverlay.BringToFront();
             MainMenuStrip = _menu;
             ApplyPolishedTheme(_menu, _tools, _statusStrip);
             SetFullscreenHudVisible(false);
+            SetPlayerControlsVisible(false);
             SetStartOverlayVisible(false);
             SetResultOverlayVisible(false);
 
             Shown += (_, _) => BeginInitialLaunchMode();
-            Resize += (_, _) => { LayoutFullscreenHud(); LayoutStartScreen(); LayoutResultOverlay(); };
+            Resize += (_, _) => { LayoutFullscreenHud(); LayoutPlayerControls(); LayoutStartScreen(); LayoutResultOverlay(); };
             LayoutFullscreenHud();
+            LayoutPlayerControls();
             LayoutStartScreen();
             LayoutResultOverlay();
             UpdateToolbarState();
@@ -296,6 +304,9 @@ namespace MakarovPhysicsSandbox
             AddStartButton(buttons, "Android Stress Chamber", () => LoadStartPreset("Android Stress Chamber"));
             AddStartButton(buttons, "Piston Crusher Lab", () => LoadStartPreset("Piston Crusher Lab"));
             AddStartButton(buttons, "Conveyor Chain Lab", () => LoadStartPreset("Conveyor Chain Lab"));
+            AddStartButton(buttons, "Bridge Jump", () => LoadStartPreset("Bridge Jump"));
+            AddStartButton(buttons, "Catapult Bridge Siege", () => LoadStartPreset("Catapult Bridge Siege"));
+            AddStartButton(buttons, "Drone Target Range", () => LoadStartPreset("Drone Target Range"));
             AddStartButton(buttons, "Open spawn catalog", () => { SetStartOverlayVisible(false); ShowSpawnCatalog(); });
             AddStartButton(buttons, "Return to editor view", () =>
             {
@@ -574,6 +585,138 @@ namespace MakarovPhysicsSandbox
             }
         }
 
+        private void BuildPlayerControls()
+        {
+            _playerControls = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(230, 18, 22, 30),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(10),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom,
+                Width = 270,
+            };
+
+            _playerControlsTitle = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                Text = "PLAY CONTROLS",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                ForeColor = Color.WhiteSmoke,
+            };
+
+            _playerControlList = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(4, 4, 4, 4),
+            };
+
+            AddPlayerHeader("Scenario");
+            AddPlayerButton("Start test", "F8", StartVerticalSliceTest);
+            AddPlayerButton("Title / presets", "F5", ShowStartScreen);
+            AddPlayerButton("Spawn catalog", "F6", ShowSpawnCatalog);
+            AddPlayerButton("Retry / reset", "R", () => _gl.Reset());
+
+            AddPlayerHeader("Spawn");
+            AddPlayerButton("Android dummy", "0", () => _gl.SpawnAndroid());
+            AddPlayerButton("Drone target", "", () => _gl.SpawnDroneTarget());
+            AddPlayerButton("Vehicle", "N", () => _gl.SpawnVehicle());
+            AddPlayerButton("Box", "2", () => _gl.Spawn(2));
+            AddPlayerButton("Explosive barrel", "", () => _gl.SpawnExplosiveBarrel());
+
+            AddPlayerHeader("Effects");
+            AddPlayerButton("Shoot ball", "Space/F", () => _gl.Shoot());
+            AddPlayerButton("Explosion", "E", () => _gl.Detonate());
+            AddPlayerButton("Ignite", "I", () => _gl.Ignite());
+            AddPlayerButton("Electrify", "D", () => _gl.Electrify());
+            AddPlayerButton("Water on/off", "V", () => _gl.Water());
+
+            AddPlayerHeader("Structures / machines");
+            AddPlayerButton("Bridge span", "", () => _gl.SpawnBridgeSpan());
+            AddPlayerButton("Catapult launcher", "", () => _gl.SpawnCatapultLauncher());
+            AddPlayerButton("Conveyor", "", () => _gl.SpawnConveyor());
+            AddPlayerButton("Piston", "", () => _gl.SpawnPiston());
+            AddPlayerButton("Sliding door", "", () => _gl.SpawnSlidingDoor());
+            AddPlayerButton("Gate", "", () => _gl.SpawnGate());
+            AddPlayerButton("Timer", "", () => _gl.SpawnTimer());
+
+            AddPlayerHeader("Playback");
+            AddPlayerButton("Pause", "P", () => _gl.TogglePause());
+            AddPlayerButton("Slow motion", "T", () => _gl.ToggleSlowMo());
+            AddPlayerButton("Editor view", "F11", ToggleFullscreen);
+
+            _playerControls.Controls.Add(_playerControlList);
+            _playerControls.Controls.Add(_playerControlsTitle);
+        }
+
+        private void AddPlayerHeader(string text)
+        {
+            var label = new Label
+            {
+                AutoSize = false,
+                Width = 226,
+                Height = 24,
+                Margin = new Padding(0, 10, 0, 2),
+                Text = text.ToUpperInvariant(),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(124, 214, 255),
+            };
+            _playerControlList.Controls.Add(label);
+        }
+
+        private void AddPlayerButton(string text, string shortcut, Action action)
+        {
+            var caption = string.IsNullOrWhiteSpace(shortcut) ? text : $"{text}    [{shortcut}]";
+            var b = new Button
+            {
+                Text = caption,
+                Width = 226,
+                Height = 34,
+                Margin = new Padding(0, 3, 0, 3),
+                TextAlign = ContentAlignment.MiddleLeft,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(38, 45, 56),
+                ForeColor = Color.WhiteSmoke,
+                Font = new Font("Segoe UI", 9F),
+            };
+            b.FlatAppearance.BorderColor = Color.FromArgb(72, 86, 104);
+            b.Click += (_, _) =>
+            {
+                action();
+                UpdateToolbarState();
+                _gl.Focus();
+            };
+            _playerControlList.Controls.Add(b);
+        }
+
+        private void LayoutPlayerControls()
+        {
+            if (_playerControls == null) return;
+            int margin = 16;
+            int top = (_hudTop != null && _hudTop.Visible) ? _hudTop.Bottom + 12 : margin;
+            int bottom = (_hudBottom != null && _hudBottom.Visible) ? ClientSize.Height - _hudBottom.Height - margin * 2 : ClientSize.Height - margin;
+            _playerControls.Left = ClientSize.Width - _playerControls.Width - margin;
+            _playerControls.Top = top;
+            _playerControls.Height = Math.Max(260, bottom - top);
+        }
+
+        private void SetPlayerControlsVisible(bool visible)
+        {
+            if (_playerControls == null) return;
+            _playerControls.Visible = visible;
+            if (visible)
+            {
+                LayoutPlayerControls();
+                _playerControls.BringToFront();
+            }
+        }
+
         private void UpdateHudState()
         {
             if (_hudMode == null || _hudHints == null) return;
@@ -607,10 +750,10 @@ namespace MakarovPhysicsSandbox
                     : $"Objective — {title}: {goal}";
 
             _hudHotbar.Text = _isFullscreen
-                ? "[F8] Start Test  [F6] Catalog  [0] Android  [N] Vehicle  [E] Boom  [I] Fire  [D] Shock"
+                ? "Player GUI: Start Test · Catalog · Spawn · Effects · Machines · Playback"
                 : "[Q] Select  [M] Move  [O] Rotate  [S] Scale  [J] Link  [K] Spring  [Del] Disconnect";
             _hudHints.Text = _isFullscreen
-                ? "F11 editor view · F8 start test · F6 catalog · R retry/reset · Space/F shoot · T slow-mo"
+                ? "F11 editor view · F5 title · F6 catalog · F8 start test · R retry/reset · Space/F shoot"
                 : "Q/M/O/S tools · 1-0/N objects · J/K/Del links · F4 properties · F11 play view";
         }
 
@@ -645,7 +788,10 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Bowling pins", "pins.png",     "9",        () => _gl.SpawnPins(), placeOnScene: true);
             AddToolbarButton(ts, "Chain",        "chain.png",    "L",        () => _gl.SpawnChain(), placeOnScene: true);
             AddToolbarButton(ts, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), placeOnScene: true);
+            AddToolbarButton(ts, "Drone target",   "drone.png",   "",  () => _gl.SpawnDroneTarget(), placeOnScene: true);
             AddToolbarButton(ts, "Vehicle",       "vehicle.png", "N", () => _gl.SpawnVehicle(), placeOnScene: true);
+            AddToolbarButton(ts, "Bridge span",   "bridge.png",  "",  () => _gl.SpawnBridgeSpan(), placeOnScene: true);
+            AddToolbarButton(ts, "Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher(), placeOnScene: true);
             AddToolbarButton(ts, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), placeOnScene: true);
             AddToolbarButton(ts, "Motor hinge",   "motor.png",   "",  () => _gl.SpawnMotor(), placeOnScene: true);
             AddToolbarButton(ts, "Gate",          "gate.png",    "",  () => _gl.SpawnGate(), placeOnScene: true);
@@ -690,6 +836,9 @@ namespace MakarovPhysicsSandbox
             AddPresetItem(presets, "Tower Collapse");
             AddPresetItem(presets, "Bridge Test");
             AddPresetItem(presets, "Catapult");
+            AddPresetItem(presets, "Bridge Jump");
+            AddPresetItem(presets, "Catapult Bridge Siege");
+            AddPresetItem(presets, "Drone Target Range");
             AddPresetItem(presets, "Newton Cradle");
             AddPresetItem(presets, "Zero-G Chaos");
             AddPresetItem(presets, "Water Playground");
@@ -792,7 +941,12 @@ namespace MakarovPhysicsSandbox
 
             var dummies = CatalogCategory("Dummies & vehicles");
             AddCatalogAction(dummies.DropDownItems, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), "Synthetic crash-test dummy");
+            AddCatalogAction(dummies.DropDownItems, "Drone target", "drone.png", "", () => _gl.SpawnDroneTarget(), "Small synthetic aerial target");
             AddCatalogAction(dummies.DropDownItems, "Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle(), "Simple crash-test vehicle rig");
+
+            var structures = CatalogCategory("Structures & launchers");
+            AddCatalogAction(structures.DropDownItems, "Bridge span", "bridge.png", "", () => _gl.SpawnBridgeSpan(), "Jointed wooden bridge module");
+            AddCatalogAction(structures.DropDownItems, "Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher(), "One-shot launcher / siege toy");
 
             var hazards = CatalogCategory("Hazards & fields");
             AddCatalogAction(hazards.DropDownItems, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), "Detonates from fire, shock or impact");
@@ -819,6 +973,7 @@ namespace MakarovPhysicsSandbox
 
             items.Add(basic);
             items.Add(dummies);
+            items.Add(structures);
             items.Add(hazards);
             items.Add(mechanisms);
             items.Add(wiring);
@@ -969,6 +1124,9 @@ namespace MakarovPhysicsSandbox
             AddItem(scene, "Clear dynamic objects", "C", () => _gl.Clear());
             AddItem(scene, "Reset scene",           "R", () => _gl.Reset());
             scene.DropDownItems.Add(new ToolStripSeparator());
+            AddItem(scene, "Place drone target", "", () => _gl.SpawnDroneTarget());
+            AddItem(scene, "Place bridge span", "", () => _gl.SpawnBridgeSpan());
+            AddItem(scene, "Place catapult launcher", "", () => _gl.SpawnCatapultLauncher());
             AddItem(scene, "Place explosive barrel", "", () => _gl.SpawnExplosiveBarrel());
             AddItem(scene, "Place motor hinge", "", () => _gl.SpawnMotor());
             AddItem(scene, "Place gate", "", () => _gl.SpawnGate());
@@ -982,6 +1140,9 @@ namespace MakarovPhysicsSandbox
             AddPresetItem(presets, "Tower Collapse");
             AddPresetItem(presets, "Bridge Test");
             AddPresetItem(presets, "Catapult");
+            AddPresetItem(presets, "Bridge Jump");
+            AddPresetItem(presets, "Catapult Bridge Siege");
+            AddPresetItem(presets, "Drone Target Range");
             AddPresetItem(presets, "Newton Cradle");
             AddPresetItem(presets, "Zero-G Chaos");
             AddPresetItem(presets, "Water Playground");
@@ -1211,7 +1372,8 @@ namespace MakarovPhysicsSandbox
                 _propertyTabs.Visible = false;
                 _isFullscreen = true;
                 SetFullscreenHudVisible(true);
-                _status.Text = "Fullscreen play view enabled. Press F11 to return to the editor layout.";
+                SetPlayerControlsVisible(true);
+                _status.Text = "Fullscreen play view enabled. Player GUI is active; press F11 to return to the editor layout.";
             }
             else
             {
@@ -1224,9 +1386,11 @@ namespace MakarovPhysicsSandbox
                 _propertyTabs.Visible = _propertyTabsVisibleBeforeFullscreen;
                 _isFullscreen = false;
                 SetFullscreenHudVisible(false);
+                SetPlayerControlsVisible(false);
                 _status.Text = "Fullscreen disabled.";
             }
             LayoutFullscreenHud();
+            LayoutPlayerControls();
             LayoutStartScreen();
             if (_startOverlay?.Visible == true) ShowStartScreen();
             UpdateToolbarState();
@@ -1271,6 +1435,14 @@ namespace MakarovPhysicsSandbox
                 "  Presets include Trigger Playground with pressure plates and automated actions.\n" +
                 "  Click a trigger plate to edit action, target, radius, strength and cooldown.\n" +
                 "  Then left-click inside the scene to place it. Esc cancels placement.\n\n" +
+                "Mechanism workflow:\n" +
+                "  Trigger plate — fires one or more outputs when pressed.\n" +
+                "  Timer — delayed relay for staged chain reactions.\n" +
+                "  Gate / Sliding Door — blocking panels opened by trigger outputs.\n" +
+                "  Conveyor — pushes bodies along the belt direction after StartConveyor.\n" +
+                "  Piston — actuator/pusher fired by StartPiston.\n" +
+                "  Motor Hinge — powered rotating arm started by StartMotor.\n" +
+                "  W — show wiring. F7 — snap selected trigger target to nearest compatible mechanism.\n\n" +
                 "Keyboard:\n" +
                 "  1–8 — objects, 9 — bowling pins, L — chain\n" +
                 "  Space/F — shoot, E — explosion\n" +

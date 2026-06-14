@@ -314,3 +314,26 @@ open one and inspect its trigger outputs to see the pattern.
   (humanoid, pose muscles, impact-driven damage, dismemberment, death, render tint) and the
   one-line `RigidBody.Tag`. Wired into `GlPanel`: per-frame update, `0`-key spawn, render
   tint, clear-on-`ClearDynamic`. README rewritten with full engine inventory + roadmap.
+
+- **2026-06-14 — M4.1 Player-facing fullscreen GUI pass**
+  - Temporarily moved focus from M3 vertical-slice tuning to M4 player-facing presentation.
+  - Added a dedicated **fullscreen Player GUI** shown only in play/fullscreen mode. It is separate from the Dev toolbar and intentionally exposes only player-appropriate actions: scenario start/title/catalog, common spawn items, hazards/effects, basic machines and playback controls.
+  - Kept the Dev mode as the complete internal/editor surface: menus, full toolbar, object tools, save/load, properties, wiring, trigger output editor and all debugging/editing commands remain there.
+  - The Player GUI uses the same action callbacks as the Dev toolbar (`SpawnAndroid`, `SpawnConveyor`, `Detonate`, `Ignite`, `StartVerticalSliceTest`, etc.), so new user-facing actions can be exposed in both places without creating separate behavior paths.
+  - Updated the fullscreen HUD text so play mode reads as a player shell rather than a hidden editor toolbar.
+  - Current limitation: this is still WinForms overlay UI, not a final custom in-engine UI/radial menu. It is meant to validate what the user-facing control surface should contain before replacing it with a more polished presentation.
+
+- **2026-06-14 — M4.2 Bridge / catapult / drone toy pass**
+  - Added three player-facing toys that support the bridge/catapult direction without opening a new broad mechanism branch:
+    - **Bridge span** — a placeable jointed wooden bridge module with anchored supports.
+    - **Catapult launcher** — a stable one-shot launcher/siege toy that fires a stone projectile; this deliberately avoids the earlier unstable full hinged catapult solver setup.
+    - **Drone target** — a third synthetic target object beside androids and vehicles, useful for bridge/catapult target practice and aerial crash-test setups.
+  - Added three showcase presets:
+    - **Bridge Jump** — vehicle crosses a jointed bridge toward a drone target.
+    - **Catapult Bridge Siege** — catapult shot against a bridge-side target setup.
+    - **Drone Target Range** — catapult launcher plus multiple synthetic drone targets.
+  - Exposed the new toys in both control surfaces:
+    - Dev mode: toolbar, Scene menu, Presets menu and Catalog.
+    - Fullscreen player mode: right-side player GUI.
+  - Added icons for `drone.png`, `bridge.png` and `catapult.png`.
+  - Important scope note: this pass is still aligned with the current M4 GUI/player-facing direction. It does not add another complex simulator subsystem; it packages already useful bridge/catapult-style gameplay objects into accessible player-facing actions.

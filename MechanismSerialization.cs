@@ -7,7 +7,8 @@ internal sealed partial class GlPanel
     private List<SceneMechanismDto> CreateMechanismDtos()
     {
         var result = new List<SceneMechanismDto>();
-        foreach (var m in _mechanisms)
+
+        foreach (SceneMechanism m in _mechanisms)
         {
             result.Add(new SceneMechanismDto
             {
@@ -33,6 +34,7 @@ internal sealed partial class GlPanel
                 TimerAction = m.TimerAction.ToString(),
             });
         }
+
         return result;
     }
 

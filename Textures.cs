@@ -47,13 +47,17 @@ internal static class Textures
     private static byte[] Generate(int size, Func<float, float, (float r, float g, float b)> pixel)
     {
         var data = new byte[size * size * 4];
+
         for (int y = 0; y < size; y++)
+        {
             for (int x = 0; x < size; x++)
             {
                 var (r, g, b) = pixel((x + 0.5f) / size, (y + 0.5f) / size);
                 int i = (y * size + x) * 4;
                 data[i] = ToByte(r); data[i + 1] = ToByte(g); data[i + 2] = ToByte(b); data[i + 3] = 255;
             }
+        }
+
         return data;
     }
 
@@ -136,8 +140,6 @@ internal static class Textures
         }), size);
     }
 
-
-
     /// <summary>Android shell: pale panels with seams and cool cyan circuitry accents.</summary>
     public static uint CreateAndroidPanel(int size = 256)
     {
@@ -147,17 +149,22 @@ internal static class Textures
             float seam = 1f;
             if (MathF.Abs(u - 0.50f) < 0.02f || MathF.Abs(v - 0.50f) < 0.02f) seam = 0.72f;
             float accent = 0f;
-            if ((u > 0.18f && u < 0.82f && MathF.Abs(v - 0.24f) < 0.03f) ||
-                (u > 0.18f && u < 0.82f && MathF.Abs(v - 0.76f) < 0.03f))
+
+            if ((u is > 0.18f and < 0.82f && MathF.Abs(v - 0.24f) < 0.03f) ||
+                (u is > 0.18f and < 0.82f && MathF.Abs(v - 0.76f) < 0.03f))
+            {
                 accent = 1f;
+            }
 
             float r = panel * seam;
             float g = panel * seam;
             float b = MathF.Min(1f, panel * seam * 1.05f);
+
             if (accent > 0.5f)
             {
                 r = 0.24f; g = 0.88f; b = 0.95f;
             }
+
             return (r, g, b);
         }), size);
     }
@@ -222,7 +229,9 @@ internal static class Textures
 
             // thin metallic seams
             if (MathF.Abs(v - 0.16f) < 0.01f || MathF.Abs(v - 0.84f) < 0.01f)
+            {
                 r = g = b = 0.85f;
+            }
 
             return (r, g, b);
         }), size);

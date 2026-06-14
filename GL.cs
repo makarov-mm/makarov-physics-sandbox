@@ -212,12 +212,20 @@ internal static class GL
     private static T Load<T>(string name) where T : Delegate
     {
         IntPtr p = Win32.wglGetProcAddress(name);
+
         // wglGetProcAddress may return 0, 1, 2, 3 or -1 on failure
         long v = p.ToInt64();
+
         if (v is 0 or 1 or 2 or 3 or -1)
+        {
             p = Win32.GetProcAddress(_opengl32, name);
+        }
+
         if (p == IntPtr.Zero)
+        {
             throw new InvalidOperationException($"OpenGL function not found: {name}");
+        }
+
         return Marshal.GetDelegateForFunctionPointer<T>(p);
     }
 
@@ -272,26 +280,43 @@ internal static class GL
     public static void BufferData(uint target, float[] data, uint usage)
     {
         var h = GCHandle.Alloc(data, GCHandleType.Pinned);
-        try { _bufferData(target, (IntPtr)(data.Length * sizeof(float)), h.AddrOfPinnedObject(), usage); }
-        finally { h.Free(); }
+
+        try
+        {
+            _bufferData(target, data.Length * sizeof(float), h.AddrOfPinnedObject(), usage);
+        }
+        finally
+        {
+            h.Free();
+        }
     }
 
     public static void BufferData(uint target, uint[] data, uint usage)
     {
         var h = GCHandle.Alloc(data, GCHandleType.Pinned);
-        try { _bufferData(target, (IntPtr)(data.Length * sizeof(uint)), h.AddrOfPinnedObject(), usage); }
-        finally { h.Free(); }
+
+        try
+        {
+            _bufferData(target, (IntPtr)(data.Length * sizeof(uint)), h.AddrOfPinnedObject(), usage);
+        }
+        finally
+        {
+            h.Free();
+        }
     }
 
-    public static void VertexAttribPointer(uint index, int size, uint type, bool normalized, int stride, int offset)
-        => _vertexAttribPointer(index, size, type, (byte)(normalized ? 1 : 0), stride, (IntPtr)offset);
-
+    public static void VertexAttribPointer(uint index, int size, uint type, bool normalized, int stride, int offset) => _vertexAttribPointer(index, size, type, (byte)(normalized ? 1 : 0), stride, offset);
     public static void EnableVertexAttribArray(uint index) => _enableVertexAttribArray(index);
 
-    public static uint GenFramebuffer() { var a = new uint[1]; _genFramebuffers(1, a); return a[0]; }
+    public static uint GenFramebuffer()
+    {
+        var a = new uint[1]; 
+        _genFramebuffers(1, a);
+        return a[0];
+    }
+
     public static void BindFramebuffer(uint target, uint fbo) => _bindFramebuffer(target, fbo);
-    public static void FramebufferTexture2D(uint target, uint attachment, uint texTarget, uint texture, int level)
-        => _framebufferTexture2D(target, attachment, texTarget, texture, level);
+    public static void FramebufferTexture2D(uint target, uint attachment, uint texTarget, uint texture, int level) => _framebufferTexture2D(target, attachment, texTarget, texture, level);
     public static uint CheckFramebufferStatus(uint target) => _checkFramebufferStatus(target);
     public static void ActiveTexture(uint unit) => _activeTexture(unit);
     public static void GenerateMipmap(uint target) => _generateMipmap(target);

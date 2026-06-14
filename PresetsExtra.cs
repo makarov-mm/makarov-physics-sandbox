@@ -28,11 +28,10 @@ internal sealed partial class GlPanel
         ResetToEmptyScene();
 
         RigidBody? first = null;
+
         for (int i = 0; i < 8; i++)
         {
-            var barrel = WithMaterial(
-                MakeBreakable(RigidBody.CreateBox(new Vector3(-5.6f + i * 1.45f, 0.5f, 0f), new Vector3(0.3f, 0.5f, 0.3f), density: 1.0f), threshold: 2.4f),
-                MaterialId.Explosive);
+            RigidBody barrel = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(-5.6f + i * 1.45f, 0.5f, 0f), new Vector3(0.3f, 0.5f, 0.3f), density: 1.0f), threshold: 2.4f), MaterialId.Explosive);
             AddBody(barrel, barrel.Color);
             first ??= barrel;
         }
@@ -52,14 +51,17 @@ internal sealed partial class GlPanel
 
         // Pyramid of explosive barrels.
         int rows = 4;
+
         for (int row = 0; row < rows; row++)
         {
             int count = rows - row;
             float y = 0.5f + row * 0.92f;
+
             for (int i = 0; i < count; i++)
             {
                 float x = 4.2f + (i - (count - 1) * 0.5f) * 0.95f;
-                var barrel = WithMaterial(
+
+                RigidBody barrel = WithMaterial(
                     MakeBreakable(RigidBody.CreateBox(new Vector3(x, y, 0f), new Vector3(0.32f, 0.45f, 0.32f), density: 1.0f), threshold: 2.5f),
                     MaterialId.Explosive);
                 AddBody(barrel, barrel.Color);
@@ -67,7 +69,7 @@ internal sealed partial class GlPanel
         }
 
         // Heavy metal ram fired into the stack.
-        var ram = WithMaterial(RigidBody.CreateSphere(new Vector3(-7.5f, 1.2f, 0f), 0.5f, density: 5.0f), MaterialId.Metal);
+        RigidBody ram = WithMaterial(RigidBody.CreateSphere(new Vector3(-7.5f, 1.2f, 0f), 0.5f, density: 5.0f), MaterialId.Metal);
         ram.Velocity = new Vector3(13.5f, 0f, 0f);
         ram.Restitution = 0.2f;
         AddBody(ram, new Vector3(0.85f, 0.80f, 0.65f));
@@ -106,28 +108,30 @@ internal sealed partial class GlPanel
     {
         ResetToEmptyScene();
 
-        // A two-high barricade of dry wooden crates spanning the lane.
+        // A two-high barricade of dry wooden crates spanning the lane. The near edge starts burning immediately
+        // so the preset reads within a few seconds instead of waiting for a tiny ignition core to maybe catch.
         for (int z = -3; z <= 3; z++)
         for (int y = 0; y < 2; y++)
         {
             var crate = WithMaterial(
                 MakeBreakable(RigidBody.CreateBox(new Vector3(-0.5f, 0.4f + y * 0.72f, z * 0.74f), new Vector3(0.34f), density: 0.6f), threshold: 4.0f),
                 MaterialId.Wood);
-            crate.Flammability = 1.3f;
+            crate.Flammability = 1.65f;
             AddBody(crate, crate.Color);
+            if (z <= -2 && y == 0) _heat.Ignite(crate);
         }
 
-        // Ignition core on one side.
-        var core = WithMaterial(RigidBody.CreateSphere(new Vector3(-0.5f, 0.4f, -3.0f), 0.26f, density: 1.0f), MaterialId.Explosive);
-        core.ExplosivePower = 0.2f; // tiny: a lighter, not a bomb
+        // Small hot starter marker on the burning side.
+        var core = WithMaterial(RigidBody.CreateSphere(new Vector3(-0.5f, 0.42f, -3.15f), 0.22f, density: 1.0f), MaterialId.Explosive);
+        core.ExplosivePower = 0.15f; // tiny: a lighter, not a bomb
         AddBody(core, core.Color);
         _heat.Ignite(core);
 
-        // Androids on the far side of the barricade.
+        // Androids on the far side of the barricade. They should stand and wait for the fire/structure failure.
         _ragdolls.SpawnAndroid(_world, new Vector3(2.2f, 0f, -0.6f));
         _ragdolls.SpawnAndroid(_world, new Vector3(2.6f, 0f, 0.8f));
 
-        StatusUpdated?.Invoke("Preset: Burning Barricade — fire ignites the dry crate wall and spreads crate-to-crate toward the androids.");
+        StatusUpdated?.Invoke("Preset: Burning Barricade — burning crates spread fire across the barricade toward the android targets.");
     }
 
     // ---- Wrecking Ball: a heavy ball on a rigid pendulum swings into a brick tower. joints + destruction. ----
@@ -177,29 +181,31 @@ internal sealed partial class GlPanel
         }
 
         // Bowling ball.
-        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-7.2f, 0.6f, 0f), 0.58f, density: 5.0f), MaterialId.Metal);
-        ball.Velocity = new Vector3(13.0f, 0f, 0f);
+        RigidBody ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-5.8f, 0.68f, 0f), 0.58f, density: 5.0f), MaterialId.Metal);
+        ball.Velocity = new Vector3(15.5f, 0f, 0f);
         ball.Restitution = 0.2f;
         AddBody(ball, new Vector3(0.20f, 0.30f, 0.55f));
 
         // "Pins": a triangle of light breakable crates...
-        int[] perRow = { 1, 2, 3, 4 };
-        float startX = 4.0f;
+        int[] perRow = [1, 2, 3, 4];
+        float startX = 2.6f;
         for (int row = 0; row < perRow.Length; row++)
         {
             int n = perRow[row];
             float x = startX + row * 0.7f;
+
             for (int i = 0; i < n; i++)
             {
                 float z = (i - (n - 1) * 0.5f) * 0.6f;
-                var pin = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(x, 0.5f, z), new Vector3(0.16f, 0.5f, 0.16f), density: 0.4f), threshold: 3.0f), MaterialId.Plastic);
+                var pin = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(x, 0.52f, z), new Vector3(0.20f, 0.48f, 0.20f), density: 0.55f), threshold: 4.6f), MaterialId.Plastic);
+                pin.Friction = 0.82f;
                 AddBody(pin, new Vector3(0.95f, 0.95f, 0.97f));
             }
         }
 
         // ...and a couple of androids mixed in for chaos.
-        _ragdolls.SpawnAndroid(_world, new Vector3(5.0f, 0f, 0.0f));
-        _ragdolls.SpawnAndroid(_world, new Vector3(6.0f, 0f, 0.0f));
+        _ragdolls.SpawnAndroid(_world, new Vector3(4.8f, 0f, -0.75f));
+        _ragdolls.SpawnAndroid(_world, new Vector3(5.6f, 0f, 0.75f));
 
         StatusUpdated?.Invoke("Preset: Ragdoll Bowling — roll the heavy ball down the lane and scatter the pins and androids.");
     }
