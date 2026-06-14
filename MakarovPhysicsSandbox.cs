@@ -592,18 +592,18 @@ namespace MakarovPhysicsSandbox
                 Visible = false,
                 BackColor = Color.FromArgb(230, 18, 22, 30),
                 BorderStyle = BorderStyle.FixedSingle,
-                Padding = new Padding(10),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom,
-                Width = 270,
+                Padding = new Padding(8),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Bottom,
+                Width = 206,
             };
 
             _playerControlsTitle = new Label
             {
                 Dock = DockStyle.Top,
                 Height = 34,
-                Text = "PLAY CONTROLS",
+                Text = "PLAYER TOOLS",
                 TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
                 ForeColor = Color.WhiteSmoke,
             };
 
@@ -611,44 +611,40 @@ namespace MakarovPhysicsSandbox
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
+                WrapContents = true,
                 AutoScroll = true,
-                Padding = new Padding(4, 4, 4, 4),
+                Padding = new Padding(2),
             };
 
-            AddPlayerHeader("Scenario");
-            AddPlayerButton("Start test", "F8", StartVerticalSliceTest);
-            AddPlayerButton("Title / presets", "F5", ShowStartScreen);
-            AddPlayerButton("Spawn catalog", "F6", ShowSpawnCatalog);
-            AddPlayerButton("Retry / reset", "R", () => _gl.Reset());
-
-            AddPlayerHeader("Spawn");
-            AddPlayerButton("Android dummy", "0", () => _gl.SpawnAndroid());
-            AddPlayerButton("Drone target", "", () => _gl.SpawnDroneTarget());
-            AddPlayerButton("Vehicle", "N", () => _gl.SpawnVehicle());
-            AddPlayerButton("Box", "2", () => _gl.Spawn(2));
-            AddPlayerButton("Explosive barrel", "", () => _gl.SpawnExplosiveBarrel());
-
-            AddPlayerHeader("Effects");
-            AddPlayerButton("Shoot ball", "Space/F", () => _gl.Shoot());
-            AddPlayerButton("Explosion", "E", () => _gl.Detonate());
-            AddPlayerButton("Ignite", "I", () => _gl.Ignite());
-            AddPlayerButton("Electrify", "D", () => _gl.Electrify());
-            AddPlayerButton("Water on/off", "V", () => _gl.Water());
-
-            AddPlayerHeader("Structures / machines");
-            AddPlayerButton("Bridge span", "", () => _gl.SpawnBridgeSpan());
-            AddPlayerButton("Catapult launcher", "", () => _gl.SpawnCatapultLauncher());
-            AddPlayerButton("Conveyor", "", () => _gl.SpawnConveyor());
-            AddPlayerButton("Piston", "", () => _gl.SpawnPiston());
-            AddPlayerButton("Sliding door", "", () => _gl.SpawnSlidingDoor());
-            AddPlayerButton("Gate", "", () => _gl.SpawnGate());
-            AddPlayerButton("Timer", "", () => _gl.SpawnTimer());
-
-            AddPlayerHeader("Playback");
-            AddPlayerButton("Pause", "P", () => _gl.TogglePause());
-            AddPlayerButton("Slow motion", "T", () => _gl.ToggleSlowMo());
-            AddPlayerButton("Editor view", "F11", ToggleFullscreen);
+            AddPlayerButton("Object", "catalog.png", "F6", ShowSpawnCatalog);
+            AddPlayerButton("Explosion", "explosion.png", "E", () => _gl.Detonate());
+            AddPlayerButton("Shoot", "shoot.png", "F", () => _gl.Shoot());
+            AddPlayerButton("Barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel());
+            AddPlayerButton("Cart", "cart.png", "", () => _gl.SpawnWoodenCart());
+            AddPlayerButton("Glass", "glass.png", "", () => _gl.SpawnGlassBlock());
+            AddPlayerButton("Drone", "drone.png", "", () => _gl.SpawnDroneTarget());
+            AddPlayerButton("Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle());
+            AddPlayerButton("Android", "android.png", "0", () => _gl.SpawnAndroid());
+            AddPlayerButton("Bridge", "bridge.png", "", () => _gl.SpawnBridgeSpan());
+            AddPlayerButton("Catapult", "catapult.png", "", () => _gl.SpawnCatapultLauncher());
+            AddPlayerButton("Wrecking", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget());
+            AddPlayerButton("Fire", "torch.png", "I", () => _gl.Ignite());
+            AddPlayerButton("Shock", "electricity.png", "D", () => _gl.Electrify());
+            AddPlayerButton("Water", "water.png", "V", () => _gl.Water());
+            AddPlayerButton("Gravity", "gravity.png", "G", () => _gl.Gravity());
+            AddPlayerButton("Attract", "attractor.png", "", () => _gl.Attractor());
+            AddPlayerButton("Repel", "repeller.png", "", () => _gl.Repeller());
+            AddPlayerButton("Wind", "wind.png", "", () => _gl.Wind());
+            AddPlayerButton("Connect", "connect.png", "J", () => _gl.Connect());
+            AddPlayerButton("Spring", "spring.png", "K", () => _gl.Spring());
+            AddPlayerButton("Disconnect", "disconnect.png", "Del", () => _gl.Disconnect());
+            AddPlayerButton("Conveyor", "conveyor.png", "", () => _gl.SpawnConveyor());
+            AddPlayerButton("Piston", "piston.png", "", () => _gl.SpawnPiston());
+            AddPlayerButton("Door", "door.png", "", () => _gl.SpawnSlidingDoor());
+            AddPlayerButton("Pause", "pause.png", "P", () => _gl.TogglePause());
+            AddPlayerButton("Slow-mo", "slowmo.png", "T", () => _gl.ToggleSlowMo());
+            AddPlayerButton("Reset", "reset.png", "R", () => _gl.Reset());
+            AddPlayerButton("Editor", "select.png", "F11", ToggleFullscreen);
 
             _playerControls.Controls.Add(_playerControlList);
             _playerControls.Controls.Add(_playerControlsTitle);
@@ -656,35 +652,27 @@ namespace MakarovPhysicsSandbox
 
         private void AddPlayerHeader(string text)
         {
-            var label = new Label
-            {
-                AutoSize = false,
-                Width = 226,
-                Height = 24,
-                Margin = new Padding(0, 10, 0, 2),
-                Text = text.ToUpperInvariant(),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font = new Font("Segoe UI Semibold", 8.5F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(124, 214, 255),
-            };
-            _playerControlList.Controls.Add(label);
+            // Fullscreen player mode uses compact icon buttons instead of text sections.
         }
 
-        private void AddPlayerButton(string text, string shortcut, Action action)
+        private void AddPlayerButton(string text, string icon, string shortcut, Action action)
         {
-            var caption = string.IsNullOrWhiteSpace(shortcut) ? text : $"{text}    [{shortcut}]";
             var b = new Button
             {
-                Text = caption,
-                Width = 226,
-                Height = 34,
-                Margin = new Padding(0, 3, 0, 3),
-                TextAlign = ContentAlignment.MiddleLeft,
+                Text = string.IsNullOrWhiteSpace(shortcut) ? text : $"{text}\n[{shortcut}]",
+                Width = 82,
+                Height = 72,
+                Margin = new Padding(4),
+                TextAlign = ContentAlignment.BottomCenter,
+                ImageAlign = ContentAlignment.TopCenter,
+                TextImageRelation = TextImageRelation.ImageAboveText,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(38, 45, 56),
                 ForeColor = Color.WhiteSmoke,
-                Font = new Font("Segoe UI", 9F),
+                Font = new Font("Segoe UI", 7.7F, FontStyle.Bold),
             };
+            var img = LoadIcon(icon);
+            if (img != null) b.Image = new Bitmap(img, new Size(28, 28));
             b.FlatAppearance.BorderColor = Color.FromArgb(72, 86, 104);
             b.Click += (_, _) =>
             {
@@ -701,7 +689,7 @@ namespace MakarovPhysicsSandbox
             int margin = 16;
             int top = (_hudTop != null && _hudTop.Visible) ? _hudTop.Bottom + 12 : margin;
             int bottom = (_hudBottom != null && _hudBottom.Visible) ? ClientSize.Height - _hudBottom.Height - margin * 2 : ClientSize.Height - margin;
-            _playerControls.Left = ClientSize.Width - _playerControls.Width - margin;
+            _playerControls.Left = margin;
             _playerControls.Top = top;
             _playerControls.Height = Math.Max(260, bottom - top);
         }
@@ -792,6 +780,9 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Vehicle",       "vehicle.png", "N", () => _gl.SpawnVehicle(), placeOnScene: true);
             AddToolbarButton(ts, "Bridge span",   "bridge.png",  "",  () => _gl.SpawnBridgeSpan(), placeOnScene: true);
             AddToolbarButton(ts, "Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher(), placeOnScene: true);
+            AddToolbarButton(ts, "Wooden cart", "cart.png", "", () => _gl.SpawnWoodenCart(), placeOnScene: true);
+            AddToolbarButton(ts, "Glass block", "glass.png", "", () => _gl.SpawnGlassBlock(), placeOnScene: true);
+            AddToolbarButton(ts, "Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget(), placeOnScene: true);
             AddToolbarButton(ts, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), placeOnScene: true);
             AddToolbarButton(ts, "Motor hinge",   "motor.png",   "",  () => _gl.SpawnMotor(), placeOnScene: true);
             AddToolbarButton(ts, "Gate",          "gate.png",    "",  () => _gl.SpawnGate(), placeOnScene: true);
@@ -943,10 +934,13 @@ namespace MakarovPhysicsSandbox
             AddCatalogAction(dummies.DropDownItems, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), "Synthetic crash-test dummy");
             AddCatalogAction(dummies.DropDownItems, "Drone target", "drone.png", "", () => _gl.SpawnDroneTarget(), "Small synthetic aerial target");
             AddCatalogAction(dummies.DropDownItems, "Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle(), "Simple crash-test vehicle rig");
+            AddCatalogAction(dummies.DropDownItems, "Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget(), "Heavy suspended impact target");
 
             var structures = CatalogCategory("Structures & launchers");
             AddCatalogAction(structures.DropDownItems, "Bridge span", "bridge.png", "", () => _gl.SpawnBridgeSpan(), "Jointed wooden bridge module");
             AddCatalogAction(structures.DropDownItems, "Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher(), "One-shot launcher / siege toy");
+            AddCatalogAction(structures.DropDownItems, "Wooden cart", "cart.png", "", () => _gl.SpawnWoodenCart(), "Breakable wooden cart sized for barrels and cargo");
+            AddCatalogAction(structures.DropDownItems, "Glass block", "glass.png", "", () => _gl.SpawnGlassBlock(), "Fragile glass object that shatters into shards");
 
             var hazards = CatalogCategory("Hazards & fields");
             AddCatalogAction(hazards.DropDownItems, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), "Detonates from fire, shock or impact");
@@ -1127,6 +1121,9 @@ namespace MakarovPhysicsSandbox
             AddItem(scene, "Place drone target", "", () => _gl.SpawnDroneTarget());
             AddItem(scene, "Place bridge span", "", () => _gl.SpawnBridgeSpan());
             AddItem(scene, "Place catapult launcher", "", () => _gl.SpawnCatapultLauncher());
+            AddItem(scene, "Place wooden cart", "", () => _gl.SpawnWoodenCart());
+            AddItem(scene, "Place glass block", "", () => _gl.SpawnGlassBlock());
+            AddItem(scene, "Place wrecking ball target", "", () => _gl.SpawnWreckingBallTarget());
             AddItem(scene, "Place explosive barrel", "", () => _gl.SpawnExplosiveBarrel());
             AddItem(scene, "Place motor hinge", "", () => _gl.SpawnMotor());
             AddItem(scene, "Place gate", "", () => _gl.SpawnGate());

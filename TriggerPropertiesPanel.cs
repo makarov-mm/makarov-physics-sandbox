@@ -122,7 +122,23 @@ internal sealed class TriggerPropertiesPanel : Panel
         Controls.Add(layout);
         Controls.Add(_info);
         Controls.Add(_title);
+        ApplyControlTheme(this);
         SetEnabled(false);
+    }
+
+    private static void ApplyControlTheme(Control root)
+    {
+        foreach (Control c in root.Controls)
+        {
+            if (c is Label or CheckBox or GroupBox) c.ForeColor = Color.Gainsboro;
+            if (c is Button b)
+            {
+                b.BackColor = Color.FromArgb(52, 60, 72);
+                b.ForeColor = Color.WhiteSmoke;
+                b.FlatStyle = FlatStyle.Flat;
+            }
+            ApplyControlTheme(c);
+        }
     }
 
     public void Bind(SelectedTriggerSnapshot? s)
@@ -135,7 +151,8 @@ internal sealed class TriggerPropertiesPanel : Panel
             _outputs.Items.Clear();
             _outputsInfo.Text = "No graph outputs.";
             BindSelectedOutputEditor();
-            SetEnabled(false);
+            ApplyControlTheme(this);
+        SetEnabled(false);
             _updating = false;
             return;
         }
@@ -298,7 +315,7 @@ internal sealed class TriggerPropertiesPanel : Panel
 
     private static void AddHeader(TableLayoutPanel t, string text)
     {
-        var l = new Label { Text = text, Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 10, 0, 2) };
+        var l = new Label { Text = text, Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(0, 10, 0, 2) };
         t.Controls.Add(l, 0, t.RowCount);
         t.SetColumnSpan(l, 2);
         t.RowCount++;
@@ -306,7 +323,7 @@ internal sealed class TriggerPropertiesPanel : Panel
 
     private static void AddRow(TableLayoutPanel t, string label, Control control)
     {
-        t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left }, 0, t.RowCount);
+        t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.Gainsboro }, 0, t.RowCount);
         t.Controls.Add(control, 1, t.RowCount);
         t.RowCount++;
     }

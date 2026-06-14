@@ -98,7 +98,23 @@ internal sealed class ObjectPropertiesPanel : Panel
         Controls.Add(layout);
         Controls.Add(_info);
         Controls.Add(_title);
+        ApplyControlTheme(this);
         SetEnabled(false);
+    }
+
+    private static void ApplyControlTheme(Control root)
+    {
+        foreach (Control c in root.Controls)
+        {
+            if (c is Label or CheckBox or GroupBox) c.ForeColor = Color.Gainsboro;
+            if (c is Button b)
+            {
+                b.BackColor = Color.FromArgb(52, 60, 72);
+                b.ForeColor = Color.WhiteSmoke;
+                b.FlatStyle = FlatStyle.Flat;
+            }
+            ApplyControlTheme(c);
+        }
     }
 
     public void Bind(SelectedBodySnapshot? s)
@@ -108,7 +124,8 @@ internal sealed class ObjectPropertiesPanel : Panel
         if (s == null)
         {
             _info.Text = "No object selected.\nClick an object in the scene.";
-            SetEnabled(false);
+            ApplyControlTheme(this);
+        SetEnabled(false);
             _updating = false;
             return;
         }
@@ -255,6 +272,7 @@ internal sealed class ObjectPropertiesPanel : Panel
             Text = text, 
             Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), 
             AutoSize = true, 
+            ForeColor = Color.Gainsboro,
             Margin = new Padding(0, 10, 0, 2)
         };
 
@@ -267,7 +285,7 @@ internal sealed class ObjectPropertiesPanel : Panel
 
     private static void AddLabeledControl(TableLayoutPanel t, string label, Control control)
     {
-        t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left }, 0, t.RowCount);
+        t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.Gainsboro }, 0, t.RowCount);
         t.Controls.Add(control, 1, t.RowCount);
         t.RowCount++;
     }

@@ -41,6 +41,7 @@ internal static class GL
     public const uint TEXTURE_2D = 0x0DE1;
     public const uint TEXTURE0 = 0x84C0;
     public const uint TEXTURE1 = 0x84C1;
+    public const uint TEXTURE2 = 0x84C2;
     public const uint REPEAT = 0x2901;
     public const uint LINEAR_MIPMAP_LINEAR = 0x2703;
     public const uint RGBA = 0x1908;

@@ -9,7 +9,7 @@ namespace MakarovPhysicsSandbox;
 
 internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
 
-internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Android, Vehicle, DroneTarget, BridgeSpan, CatapultLauncher, ExplosiveBarrel, Motor, Gate, Timer, Conveyor, Piston, SlidingDoor, Ignite, Electrify }
+internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Android, Vehicle, DroneTarget, BridgeSpan, CatapultLauncher, WoodenCart, GlassBlock, WreckingBallTarget, ExplosiveBarrel, Motor, Gate, Timer, Conveyor, Piston, SlidingDoor, Ignite, Electrify }
 
 
 internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller, StartMotor, OpenGate, StartTimer, StartConveyor, StartPiston, ToggleDoor }
@@ -239,11 +239,12 @@ internal sealed partial class GlPanel : Control
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
     private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _planeMesh = null!, _waterMesh = null!;
-    private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire;
+    private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal;
+    private uint _bumpCrate, _bumpBrick, _bumpCartWood, _bumpRustyMetal, _bumpBall, _bumpBowlingPin, _bumpGlass, _bumpVehicle, _bumpTire, _bumpBarrel;
     private uint _shadowFbo, _shadowTex;
     private const int ShadowSize = 2048;
 
-    private int _uModel, _uView, _uProj, _uLightVP, _uColor, _uLightDir, _uCamPos, _uShadowMap, _uAlbedo, _uUvScale, _uAlpha, _uEmissive, _uTime, _uWaterWaveAmp, _uRippleCount, _uRipples;
+    private int _uModel, _uView, _uProj, _uLightVP, _uColor, _uLightDir, _uCamPos, _uShadowMap, _uAlbedo, _uBumpMap, _uUseBumpMap, _uUvScale, _uAlpha, _uEmissive, _uBumpStrength, _uTime, _uWaterWaveAmp, _uRippleCount, _uRipples;
     private readonly float[] _rippleBuffer = new float[WaterVolume.MaxRipples * 4];
     private int _dModel, _dLightVP;
 
@@ -433,6 +434,9 @@ internal sealed partial class GlPanel : Control
     public void SpawnDroneTarget() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.DroneTarget); Focus(); } }
     public void SpawnBridgeSpan() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.BridgeSpan); Focus(); } }
     public void SpawnCatapultLauncher() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.CatapultLauncher); Focus(); } }
+    public void SpawnWoodenCart() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.WoodenCart); Focus(); } }
+    public void SpawnGlassBlock() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.GlassBlock); Focus(); } }
+    public void SpawnWreckingBallTarget() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.WreckingBallTarget); Focus(); } }
     public void SpawnExplosiveBarrel() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.ExplosiveBarrel); Focus(); } }
     public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
     public void Electrify()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Electrify); Focus(); } }
@@ -738,6 +742,7 @@ internal sealed partial class GlPanel : Control
         _heat.Update(simDt, _world, _ragdolls);
         _electricity.Update(simDt, _world, _ragdolls);
         UpdateMaterialReactions(simDt);
+        UpdateDroneHover(simDt);
         SpawnFireEffects(simDt);
         SpawnElectricityEffects(simDt);
         SpawnAndroidDamageEffects(simDt);
@@ -1017,9 +1022,12 @@ internal sealed partial class GlPanel : Control
         _uLightDir = GL.GetUniformLocation(_mainProgram, "uLightDir");
         _uCamPos = GL.GetUniformLocation(_mainProgram, "uCamPos");
         _uAlbedo = GL.GetUniformLocation(_mainProgram, "uAlbedo");
+        _uBumpMap = GL.GetUniformLocation(_mainProgram, "uBumpMap");
+        _uUseBumpMap = GL.GetUniformLocation(_mainProgram, "uUseBumpMap");
         _uUvScale = GL.GetUniformLocation(_mainProgram, "uUvScale");
         _uAlpha = GL.GetUniformLocation(_mainProgram, "uAlpha");
         _uEmissive = GL.GetUniformLocation(_mainProgram, "uEmissive");
+        _uBumpStrength = GL.GetUniformLocation(_mainProgram, "uBumpStrength");
         _uTime = GL.GetUniformLocation(_mainProgram, "uTime");
         _uWaterWaveAmp = GL.GetUniformLocation(_mainProgram, "uWaterWaveAmp");
         _uRippleCount = GL.GetUniformLocation(_mainProgram, "uRippleCount");
@@ -1030,14 +1038,31 @@ internal sealed partial class GlPanel : Control
         _dLightVP = GL.GetUniformLocation(_depthProgram, "uLightVP");
 
         _texFloor = Textures.CreateCheckerFloor();
-        _texCrate = Textures.CreateCrate();
+        _texCrate = Textures.WoodCrateAlbedo();
         _texStripes = Textures.CreateStripes();
         _texMetal = Textures.CreateMetal();
         _texConcrete = Textures.CreateConcrete();
-        _texBarrel = Textures.CreateBarrel();
+        _texBarrel = Textures.LoadOrCreate("barrel_albedo.png", () => Textures.CreateBarrel());
         _texAndroid = Textures.CreateAndroidPanel();
-        _texVehicle = Textures.CreateVehiclePaint();
-        _texTire = Textures.CreateTire();
+        _texVehicle = Textures.VehiclePaintAlbedo();
+        _texTire = Textures.TireAlbedo();
+        _texGlass = Textures.GlassAlbedo();
+        _texSky = Textures.LoadOrCreate("skybox_clouds.png", () => Textures.CreateSkybox());
+        _texBall = Textures.BallAlbedo();
+        _texBowlingPin = Textures.BowlingPinAlbedo();
+        _texBrick = Textures.BrickWallAlbedo();
+        _texCartWood = Textures.CartWoodAlbedo();
+        _texRustyMetal = Textures.RustyMetalAlbedo();
+        _bumpCrate = Textures.WoodCrateBump();
+        _bumpBrick = Textures.BrickWallBump();
+        _bumpCartWood = Textures.CartWoodBump();
+        _bumpRustyMetal = Textures.RustyMetalBump();
+        _bumpBall = Textures.BallBump();
+        _bumpBowlingPin = Textures.BowlingPinBump();
+        _bumpGlass = Textures.GlassBump();
+        _bumpVehicle = Textures.VehiclePaintBump();
+        _bumpTire = Textures.TireBump();
+        _bumpBarrel = Textures.LoadOrCreate("barrel_bump.png", () => Textures.CreateBarrel());
 
         _cubeMesh = Mesh.CreateCube();
         _sphereMesh = Mesh.CreateSphere();
@@ -1724,7 +1749,8 @@ internal sealed partial class GlPanel : Control
 
     private void AddBody(RigidBody body, Vector3 color)
     {
-        body.Color = color;
+        // Wood is now mostly texture-driven; random candy colours made crates look like toy blocks.
+        body.Color = body.MaterialId == MaterialId.Wood ? Vector3.One : color;
         _world.Bodies.Add(body);
     }
 
@@ -2248,7 +2274,7 @@ internal sealed partial class GlPanel : Control
         float c = ArenaHalf + t;              // wall center offset
         float len = ArenaHalf + 2f * t;       // half-length, overlaps the corners
 
-        var wallColor = new Vector3(0.32f, 0.34f, 0.38f);
+        var wallColor = new Vector3(1.0f, 1.0f, 1.0f);
         var halfX = new Vector3(t, hh, len);
         var halfZ = new Vector3(len, hh, t);
 
@@ -2261,6 +2287,7 @@ internal sealed partial class GlPanel : Control
         })
         {
             w.Color = wallColor;
+            w.Tag = "ArenaWall";
             _world.Bodies.Add(w);
         }
     }
@@ -2284,16 +2311,16 @@ internal sealed partial class GlPanel : Control
         RigidBody body = kind switch
         {
             1 => RigidBody.CreateSphere(pos, 0.35f + J() * 0.4f),
-            3 => RigidBody.CreateCapsule(pos, 0.28f + J() * 0.18f),
-            4 => RigidBody.CreateBox(pos, new Vector3(           // plank
-                     0.75f + J() * 0.35f, 0.10f + J() * 0.05f, 0.45f + J() * 0.15f)),
-            5 => RigidBody.CreateBox(pos, new Vector3(           // pillar
-                     0.20f + J() * 0.08f, 0.75f + J() * 0.35f, 0.20f + J() * 0.08f)),
+            3 => WithMaterial(RigidBody.CreateCapsule(pos, 0.28f + J() * 0.18f), MaterialId.Metal),
+            4 => WithMaterial(RigidBody.CreateBox(pos, new Vector3(           // plank
+                     0.75f + J() * 0.35f, 0.10f + J() * 0.05f, 0.45f + J() * 0.15f)), MaterialId.Wood),
+            5 => WithMaterial(RigidBody.CreateBox(pos, new Vector3(           // pillar
+                     0.20f + J() * 0.08f, 0.75f + J() * 0.35f, 0.20f + J() * 0.08f)), MaterialId.Wood),
             6 => MakeDumbbell(pos, 0.8f + J() * 0.5f),
             7 => MakeHammer(pos, 0.9f + J() * 0.4f),
             8 => MakeTable(pos, 0.9f + J() * 0.3f),
-            _ => RigidBody.CreateBox(pos, new Vector3(
-                     0.3f + J() * 0.45f, 0.3f + J() * 0.45f, 0.3f + J() * 0.45f)),
+            _ => WithMaterial(RigidBody.CreateBox(pos, new Vector3(
+                     0.3f + J() * 0.45f, 0.3f + J() * 0.45f, 0.3f + J() * 0.45f)), MaterialId.Wood),
         };
 
         if (body.Children.Length > 1 || body.Children[0].Shape != ShapeType.Sphere)
@@ -2302,27 +2329,37 @@ internal sealed partial class GlPanel : Control
                 J() * MathF.PI, J() * 0.6f, J() * 0.6f);
             body.UpdateDerived();
         }
-        body.Color = Palette[_rng.Next(Palette.Length)];
+        body.Color = body.MaterialId == MaterialId.Wood ? Vector3.One : Palette[_rng.Next(Palette.Length)];
         body.Velocity = new Vector3(0, -1.5f, 0);
         _world.Bodies.Add(body);
     }
 
     // compound bodies: a couple of multi-shape props to show off CreateCompound
 
-    private static RigidBody MakeDumbbell(Vector3 pos, float k = 1f) =>
-        RigidBody.CreateCompound(pos, [
-            ChildShape.Box(new Vector3(0.50f * k, 0.085f * k, 0.085f * k)),
-            ChildShape.Sphere(0.27f * k, new Vector3(-0.50f * k, 0, 0)),
-            ChildShape.Sphere(0.27f * k, new Vector3( 0.50f * k, 0, 0)),
-        ], density: 1.4f);
+    private static RigidBody MakeDumbbell(Vector3 pos, float k = 1f)
+    {
+        var b = WithMaterial(RigidBody.CreateCompound(pos, [
+            ChildShape.Capsule(0.09f * k, Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f)),
+            ChildShape.Sphere(0.30f * k, new Vector3(-0.54f * k, 0, 0)),
+            ChildShape.Sphere(0.30f * k, new Vector3( 0.54f * k, 0, 0)),
+        ], density: 2.2f), MaterialId.Metal);
+        b.Tag = "Dumbbell";
+        b.Color = new Vector3(0.82f, 0.84f, 0.86f);
+        return b;
+    }
 
-    private static RigidBody MakeHammer(Vector3 pos, float k = 1f) =>
-        RigidBody.CreateCompound(pos, [
-            ChildShape.Box(new Vector3(0.55f * k, 0.07f * k, 0.07f * k)),
-            // the heavy head shifts the COM well off the handle's middle -
-            // watch how it tumbles compared to a plain box
-            ChildShape.Box(new Vector3(0.13f * k, 0.18f * k, 0.30f * k), new Vector3(0.58f * k, 0, 0)),
-        ], density: 3f);
+    private static RigidBody MakeHammer(Vector3 pos, float k = 1f)
+    {
+        var b = RigidBody.CreateCompound(pos, [
+            ChildShape.Capsule(0.075f * k, Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f)),
+            // the heavy metal head shifts the COM well off the wooden handle's middle.
+            ChildShape.Box(new Vector3(0.14f * k, 0.20f * k, 0.32f * k), new Vector3(0.60f * k, 0, 0)),
+        ], density: 2.6f);
+        b.MaterialId = MaterialId.Wood;
+        b.Tag = "Hammer";
+        b.Color = Vector3.One;
+        return b;
+    }
 
     // a little table: tabletop plus four legs. Five boxes welded into one rigid body -
     // a good stress test for the compound inertia math, and it stacks/topples nicely.
@@ -2435,10 +2472,34 @@ internal sealed partial class GlPanel : Control
         StatusUpdated?.Invoke("Placed catapult launcher. It immediately fires a stone projectile along its test arc.");
     }
 
+    private void SpawnWoodenCartAtAim()
+    {
+        EvictIfFull();
+        var p = _aimValid ? _aimPoint : Vector3.Zero;
+        AddWoodenCart(p + new Vector3(0f, 0.35f, 0f));
+        StatusUpdated?.Invoke("Placed wooden cart. It is sized to carry an explosive barrel or other props.");
+    }
+
+    private void SpawnGlassBlockAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.65f, 0f);
+        AddGlassBlock(p, new Vector3(0.42f, 0.65f, 0.42f));
+        StatusUpdated?.Invoke("Placed breakable glass block. Hard impacts replace it with glass shards.");
+    }
+
+    private void SpawnWreckingBallTargetAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 2.0f, 0f);
+        AddWreckingBallTarget(p);
+        StatusUpdated?.Invoke("Placed wrecking ball target. Heavy suspended object for bridge/cart/catapult tests.");
+    }
+
     private void SpawnDroneTargetAtAim()
     {
         EvictIfFull();
-        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 1.15f, 0f);
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 1.85f, 0f);
         SpawnDroneTarget(p, new Vector3(0.25f, 0.85f, 1.0f));
         StatusUpdated?.Invoke("Placed synthetic drone target.");
     }
@@ -2460,35 +2521,97 @@ internal sealed partial class GlPanel : Control
         drone.Friction = 0.42f;
         drone.Restitution = 0.28f;
         drone.Breakable = true;
-        drone.BreakThreshold = 3.2f;
+        drone.BreakThreshold = 7.5f;
         drone.Flammability = MathF.Max(drone.Flammability, 0.35f);
         drone.Conductivity = MathF.Max(drone.Conductivity, 0.65f);
         _world.Bodies.Add(drone);
         return drone;
     }
 
+    private RigidBody AddGlassBlock(Vector3 p, Vector3 halfExtents)
+    {
+        var glass = WithMaterial(RigidBody.CreateBox(p, halfExtents, density: 1.20f), MaterialId.Glass);
+        glass.Tag = "GlassBlock";
+        glass.Color = new Vector3(0.72f, 0.92f, 1.0f);
+        glass.Restitution = 0.16f;
+        glass.Friction = 0.22f;
+        glass.Breakable = true;
+        glass.BreakThreshold = 2.8f;
+        glass.BreakPieces = 18;
+        _world.Bodies.Add(glass);
+        return glass;
+    }
+
+    private List<RigidBody> AddWoodenCart(Vector3 p)
+    {
+        // Stable cart: one compound rigid body instead of several overlapping planks tied by springs.
+        // The earlier spring-built cart could explode on spawn because the solver had to resolve
+        // many close contacts and joints immediately.
+        var cart = WithMaterial(RigidBody.CreateCompound(p + new Vector3(0f, 0.38f, 0f), [
+            ChildShape.Box(new Vector3(1.12f, 0.10f, 0.66f), new Vector3(0f, 0.00f, 0f)),      // bed
+            ChildShape.Box(new Vector3(1.16f, 0.26f, 0.07f), new Vector3(0f, 0.32f, -0.70f)),  // front board
+            ChildShape.Box(new Vector3(1.16f, 0.26f, 0.07f), new Vector3(0f, 0.32f,  0.70f)),  // rear board
+            ChildShape.Box(new Vector3(0.07f, 0.26f, 0.64f), new Vector3(-1.16f, 0.32f, 0f)),  // left board
+            ChildShape.Box(new Vector3(0.07f, 0.26f, 0.64f), new Vector3( 1.16f, 0.32f, 0f)),  // right board
+            ChildShape.Sphere(0.22f, new Vector3(-0.88f, -0.30f, -0.50f)),
+            ChildShape.Sphere(0.22f, new Vector3( 0.88f, -0.30f, -0.50f)),
+            ChildShape.Sphere(0.22f, new Vector3(-0.88f, -0.30f,  0.50f)),
+            ChildShape.Sphere(0.22f, new Vector3( 0.88f, -0.30f,  0.50f)),
+        ], density: 0.65f), MaterialId.Wood);
+        cart.Tag = "WoodenCart";
+        cart.Color = Vector3.One;
+        cart.Friction = 0.68f;
+        cart.Restitution = 0.08f;
+        cart.Breakable = true;
+        cart.BreakThreshold = 8.5f;
+        cart.BreakPieces = 14;
+        _world.Bodies.Add(cart);
+        return [cart];
+    }
+
+    private RigidBody AddWreckingBallTarget(Vector3 p)
+    {
+        var anchor = RigidBody.CreateStaticBox(p + new Vector3(0f, 1.45f, 0f), new Vector3(0.18f, 0.12f, 0.18f));
+        anchor.Tag = "WreckingBallAnchor";
+        anchor.Color = new Vector3(0.35f, 0.35f, 0.34f);
+        _world.Bodies.Add(anchor);
+
+        var ball = WithMaterial(RigidBody.CreateSphere(p, 0.52f, density: 2.4f), MaterialId.Metal);
+        ball.Tag = "WreckingBallTarget";
+        ball.Color = new Vector3(0.45f, 0.46f, 0.47f);
+        ball.Friction = 0.42f;
+        ball.Restitution = 0.18f;
+        ball.Breakable = false;
+        _world.Bodies.Add(ball);
+        _world.Joints.Add(MakeSpring(anchor, ball, stiffness: 24f, damping: 2.2f));
+        return ball;
+    }
+
     private void AddCatapultLauncher(Vector3 p, Vector3 projectileVelocity)
     {
-        var baseBox = RigidBody.CreateStaticBox(p + new Vector3(0f, 0.20f, 0f), new Vector3(1.35f, 0.20f, 0.62f));
-        baseBox.Color = new Vector3(0.28f, 0.24f, 0.20f);
-        _world.Bodies.Add(baseBox);
+        // Single editable compound launcher. The old catapult consisted of several static bodies,
+        // so selecting/moving/scaling it only affected one part. This version edits as one object.
+        var launcher = WithMaterial(RigidBody.CreateCompound(p + new Vector3(0f, 0.58f, 0f), [
+            ChildShape.Box(new Vector3(1.35f, 0.18f, 0.62f), new Vector3(0f, -0.38f, 0f)),
+            ChildShape.Box(new Vector3(1.85f, 0.07f, 0.17f), new Vector3(0.65f, 0.24f, 0f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -0.18f)),
+            ChildShape.Box(new Vector3(0.38f, 0.055f, 0.32f), new Vector3(2.35f, 0.50f, 0f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -0.18f)),
+            ChildShape.Box(new Vector3(0.12f, 0.44f, 0.16f), new Vector3(-0.78f, -0.06f, -0.42f)),
+            ChildShape.Box(new Vector3(0.12f, 0.44f, 0.16f), new Vector3(-0.78f, -0.06f,  0.42f)),
+            ChildShape.Sphere(0.16f, new Vector3(-0.85f, -0.50f, -0.45f)),
+            ChildShape.Sphere(0.16f, new Vector3(-0.85f, -0.50f,  0.45f)),
+        ], density: 0.75f), MaterialId.Wood);
+        launcher.Tag = "CatapultLauncher";
+        launcher.Color = Vector3.One;
+        launcher.SetStatic(true);
+        launcher.RefreshProxies();
+        _world.Bodies.Add(launcher);
 
-        var arm = RigidBody.CreateStaticBox(p + new Vector3(0.65f, 0.82f, 0f), new Vector3(1.85f, 0.08f, 0.18f));
-        arm.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.18f);
-        arm.UpdateDerived();
-        arm.Color = new Vector3(0.55f, 0.34f, 0.18f);
-        _world.Bodies.Add(arm);
-
-        var cup = RigidBody.CreateStaticBox(p + new Vector3(2.35f, 1.10f, 0f), new Vector3(0.38f, 0.06f, 0.32f));
-        cup.Rotation = arm.Rotation;
-        cup.UpdateDerived();
-        cup.Color = new Vector3(0.48f, 0.30f, 0.16f);
-        _world.Bodies.Add(cup);
-
-        var projectile = WithMaterial(RigidBody.CreateSphere(p + new Vector3(2.05f, 1.38f, 0f), 0.32f, density: 1.4f), MaterialId.Stone);
-        projectile.Restitution = 0.35f;
+        var projectile = WithMaterial(RigidBody.CreateSphere(p + new Vector3(2.35f, 1.55f, 0f), 0.33f, density: 1.6f), MaterialId.Stone);
+        projectile.Color = new Vector3(0.66f, 0.62f, 0.54f);
+        projectile.Restitution = 0.18f;
+        projectile.Friction = 0.42f;
         projectile.Velocity = projectileVelocity;
-        AddBody(projectile, new Vector3(1.0f, 0.82f, 0.22f));
+        _world.Bodies.Add(projectile);
     }
 
     private sealed class VehicleRig
@@ -2692,6 +2815,15 @@ internal sealed partial class GlPanel : Control
             case PendingSceneActionKind.CatapultLauncher:
                 SpawnCatapultLauncherAtAim();
                 break;
+            case PendingSceneActionKind.WoodenCart:
+                SpawnWoodenCartAtAim();
+                break;
+            case PendingSceneActionKind.GlassBlock:
+                SpawnGlassBlockAtAim();
+                break;
+            case PendingSceneActionKind.WreckingBallTarget:
+                SpawnWreckingBallTargetAtAim();
+                break;
             case PendingSceneActionKind.ExplosiveBarrel:
                 SpawnExplosiveBarrelAtAim();
                 break;
@@ -2755,6 +2887,9 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.DroneTarget => "drone target",
         PendingSceneActionKind.BridgeSpan => "bridge span",
         PendingSceneActionKind.CatapultLauncher => "catapult launcher",
+        PendingSceneActionKind.WoodenCart => "wooden cart",
+        PendingSceneActionKind.GlassBlock => "glass block",
+        PendingSceneActionKind.WreckingBallTarget => "wrecking ball target",
         PendingSceneActionKind.ExplosiveBarrel => "explosive barrel",
         PendingSceneActionKind.Motor => "motor hinge",
         PendingSceneActionKind.Gate => "gate",
@@ -3706,6 +3841,26 @@ internal sealed partial class GlPanel : Control
         catch { /* sound is non-critical feedback */ }
     }
 
+    private void UpdateDroneHover(float dt)
+    {
+        if (dt <= 0f || _zeroG) return;
+        foreach (var b in _world.Bodies)
+        {
+            if (!string.Equals(b.Tag as string, "DroneTarget", StringComparison.Ordinal)) continue;
+            if (b.IsStatic || b.Children.Length < 6) continue;
+
+            // Gameplay hover: cancel gravity while the intact synthetic drone exists.
+            // Broken debris pieces are single fragments and do not keep this tag/shape set.
+            b.Velocity.Y += -DefaultGravity.Y * dt;
+            float desiredY = 2.45f;
+            float error = desiredY - b.Position.Y;
+            b.Velocity.Y += Math.Clamp(error * 5.5f - b.Velocity.Y * 0.45f, -4.0f, 5.0f) * dt;
+            if (b.Position.Y < 1.35f && b.Velocity.Y < 0f) b.Velocity.Y *= 0.15f;
+            b.AngularVelocity *= 0.88f;
+            b.Wake();
+        }
+    }
+
     private void SpawnAmbientSceneEffects(float dt)
     {
         if (dt <= 0f) return;
@@ -3778,8 +3933,11 @@ internal sealed partial class GlPanel : Control
             {
                 EvictIfFull();
                 var p = _aimPoint + fwd * (row * gap * 0.87f) + right * ((k - row * 0.5f) * gap);
-                var pin = RigidBody.CreateCapsule(new Vector3(p.X, 0.42f, p.Z), 0.13f);
-                pin.Color = new Vector3(0.95f, 0.95f, 0.95f);
+                var pin = WithMaterial(RigidBody.CreateCapsule(new Vector3(p.X, p.Y + 0.52f, p.Z), 0.17f, density: 0.75f), MaterialId.Plastic);
+                pin.Tag = "BowlingPin";
+                pin.Color = Vector3.One;
+                pin.Friction = 0.44f;
+                pin.Restitution = 0.22f;
                 _world.Bodies.Add(pin);
             }
     }
@@ -4015,7 +4173,7 @@ internal sealed partial class GlPanel : Control
         if (body != null && body.UserObject)
             SelectBody(body);
 
-        if (_selectedBody == null || _selectedBody.IsStatic) return;
+        if (_selectedBody == null) return;
 
         _selectedBody.Wake();
         _toolDragging = true;
@@ -4221,10 +4379,16 @@ internal sealed partial class GlPanel : Control
 
         GL.ActiveTexture(GL.TEXTURE1);
         GL.Uniform1(_uAlbedo, 1);
+        GL.ActiveTexture(GL.TEXTURE2);
+        GL.Uniform1(_uBumpMap, 2);
+        GL.Uniform1(_uUseBumpMap, 0f);
+        GL.ActiveTexture(GL.TEXTURE1);
         GL.Uniform1(_uAlpha, 1f);
         GL.Uniform1(_uEmissive, 0f);
         GL.Uniform1(_uTime, tScene);
         GL.Uniform1(_uWaterWaveAmp, 0f);
+
+        DrawSkybox();
 
         // floor
         GL.BindTexture(GL.TEXTURE_2D, _texFloor);
@@ -4264,6 +4428,11 @@ internal sealed partial class GlPanel : Control
                 GL.Uniform1(_uEmissive, 0f);
             }
 
+            // Authored wood textures should read as wood, not as candy-coloured blocks.
+            // Keep selection/field/ragdoll/heat/electric feedback, but neutralize normal wood tint.
+            if (b.MaterialId == MaterialId.Wood && b != _selectedBody && b != _world.Grabbed && b != _jointFirstBody && !fieldAffected)
+                color = Vector3.One;
+
             // Fire takes visual priority: a burning/glowing body overrides any other tint.
             if (HeatSystem.TryTint(b, out var hotColor, out float hotGlow))
             {
@@ -4280,8 +4449,19 @@ internal sealed partial class GlPanel : Control
 
             foreach (ref var child in b.Children.AsSpan())
             {
-                GL.BindTexture(GL.TEXTURE_2D, TextureFor(b, child.Shape));
-                if (b.IsStatic) GL.Uniform1(_uUvScale, 6f);
+                if (IsBowlingPin(b))
+                {
+                    DrawBowlingPinVisual(b);
+                    continue;
+                }
+                GL.BindTexture(GL.TEXTURE_2D, TextureFor(b, in child));
+                uint bumpTex = BumpTextureFor(b, in child);
+                GL.ActiveTexture(GL.TEXTURE2);
+                GL.BindTexture(GL.TEXTURE_2D, bumpTex);
+                GL.Uniform1(_uUseBumpMap, bumpTex != 0 ? 1f : 0f);
+                GL.ActiveTexture(GL.TEXTURE1);
+                GL.Uniform1(_uBumpStrength, BumpStrengthFor(b, in child));
+                if (b.IsStatic) GL.Uniform1(_uUvScale, IsArenaWall(b) ? 14f : 6f);
                 GL.UniformMatrix4(_uModel, ToArray(ModelMatrix(b, in child)));
                 MeshFor(child.Shape).Draw();
                 if (IsExplosiveBarrel(b) && child.Shape == ShapeType.Capsule)
@@ -4292,10 +4472,14 @@ internal sealed partial class GlPanel : Control
                     DrawVehicleChassisOverlay(b, in child);
                 else if (IsVehicleWheel(b) && child.Shape == ShapeType.Sphere)
                     DrawVehicleWheelOverlay(b, in child);
+                else if (IsWoodenCart(b) && child.Shape == ShapeType.Sphere)
+                    DrawCartWheelOverlay(b, in child);
                 if (b.IsStatic) GL.Uniform1(_uUvScale, 1f);
             }
         }
         GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform1(_uBumpStrength, 0f);
+        GL.Uniform1(_uUseBumpMap, 0f);
 
         DrawJointRods();
         DrawFieldMarkers();
@@ -4308,6 +4492,108 @@ internal sealed partial class GlPanel : Control
         DrawTriggers();
         DrawChallengeMarker();
         DrawWater();
+    }
+
+    private void DrawSkybox()
+    {
+        GL.DepthFunc(GL.LEQUAL);
+        GL.CullFace(GL.FRONT);
+        GL.BindTexture(GL.TEXTURE_2D, _texSky);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uAlpha, 1f);
+        GL.Uniform1(_uEmissive, 1f);
+        GL.Uniform3(_uColor, 1f, 1f, 1f);
+        GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(78f) * Matrix4x4.CreateTranslation(_camPos)));
+        _cubeMesh.Draw();
+        GL.CullFace(GL.BACK);
+        GL.DepthFunc(GL.LESS);
+        GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private void DrawCartWheelOverlay(RigidBody b, in ChildShape child)
+    {
+        // The cart is still one stable compound body, but the wheel spokes rotate visually
+        // from travelled distance so the player does not read it as a static crate-on-balls.
+        var bodyRot = Matrix4x4.CreateFromQuaternion(b.Rotation);
+        var center = Vector3.Transform(child.LocalPos, bodyRot) + b.Position;
+        var up = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitY, bodyRot));
+        var side = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitX, bodyRot));
+        float spin = (b.Position.X + b.Position.Z) * 4.5f + (float)_sw.Elapsed.TotalSeconds * b.Velocity.Length() * 3.2f;
+        float r = child.Radius * 0.92f;
+
+        GL.BindTexture(GL.TEXTURE_2D, _texRustyMetal);
+        GL.ActiveTexture(GL.TEXTURE2);
+        GL.BindTexture(GL.TEXTURE_2D, _bumpRustyMetal);
+        GL.Uniform1(_uUseBumpMap, 1f);
+        GL.ActiveTexture(GL.TEXTURE1);
+        GL.Uniform1(_uBumpStrength, 0.28f);
+        GL.Uniform1(_uEmissive, 0f);
+
+        for (int i = 0; i < 6; i++)
+        {
+            float a = spin + i * MathF.PI / 6f;
+            var dir = Vector3.Normalize(side * MathF.Cos(a) + up * MathF.Sin(a));
+            DrawGizmoRod(center - dir * r, center + dir * r, new Vector3(0.06f, 0.055f, 0.045f), 0.020f);
+        }
+        // Small bright hub so wheel spin reads even from a distance.
+        GL.Uniform3(_uColor, 0.55f, 0.50f, 0.42f);
+        GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(child.Radius * 0.28f) * Matrix4x4.CreateTranslation(center)));
+        _sphereMesh.Draw();
+
+        GL.Uniform1(_uUseBumpMap, 0f);
+        GL.Uniform1(_uBumpStrength, 0f);
+    }
+
+    private void DrawBowlingPinVisual(RigidBody b)
+    {
+        // Physics remains a simple capsule, but the rendered object is closer to a real bowling pin.
+        // This sets a useful rule for future props: collision can stay simple while visuals are richer.
+        GL.BindTexture(GL.TEXTURE_2D, _texBowlingPin);
+        GL.ActiveTexture(GL.TEXTURE2);
+        GL.BindTexture(GL.TEXTURE_2D, _bumpBowlingPin);
+        GL.Uniform1(_uUseBumpMap, 1f);
+        GL.ActiveTexture(GL.TEXTURE1);
+        GL.Uniform1(_uBumpStrength, 0.20f);
+        GL.Uniform1(_uUvScale, 1f);
+        GL.Uniform1(_uEmissive, 0f);
+
+        float visualScale = 1f;
+        if (b.Children.Length > 0)
+            visualScale = Math.Clamp(b.Children[0].Radius / 0.17f, 0.25f, 6.0f);
+
+        Matrix4x4 BodyMatrix(Vector3 scale, Vector3 local)
+            => Matrix4x4.CreateScale(scale * visualScale)
+             * Matrix4x4.CreateTranslation(local * visualScale)
+             * Matrix4x4.CreateFromQuaternion(b.Rotation)
+             * Matrix4x4.CreateTranslation(b.Position);
+
+        void DrawSphere(Vector3 scale, Vector3 local, Vector3 color)
+        {
+            GL.Uniform3(_uColor, color.X, color.Y, color.Z);
+            GL.UniformMatrix4(_uModel, ToArray(BodyMatrix(scale, local)));
+            _sphereMesh.Draw();
+        }
+
+        void DrawBand(float y, float halfHeight)
+        {
+            // Draw the red neck rings as flattened ellipsoids instead of box strips.
+            // The previous cube bands looked like red square blocks attached to the pin.
+            GL.BindTexture(GL.TEXTURE_2D, _texStripes);
+            GL.Uniform3(_uColor, 0.92f, 0.04f, 0.035f);
+            GL.UniformMatrix4(_uModel, ToArray(BodyMatrix(new Vector3(0.155f, halfHeight, 0.155f), new Vector3(0f, y, 0f))));
+            _sphereMesh.Draw();
+            GL.BindTexture(GL.TEXTURE_2D, _texBowlingPin);
+        }
+
+        var white = new Vector3(1.0f, 0.97f, 0.88f);
+        DrawSphere(new Vector3(0.24f, 0.17f, 0.24f), new Vector3(0f, -0.21f, 0f), white); // belly
+        DrawSphere(new Vector3(0.13f, 0.25f, 0.13f), new Vector3(0f,  0.10f, 0f), white); // neck/body
+        DrawSphere(new Vector3(0.115f, 0.09f, 0.115f), new Vector3(0f, 0.39f, 0f), white); // head
+        DrawBand(0.18f, 0.022f);
+        DrawBand(0.25f, 0.018f);
+
+        GL.Uniform1(_uUseBumpMap, 0f);
+        GL.Uniform1(_uBumpStrength, 0f);
     }
 
     /// <summary>Visual rods and springs drawn between joint anchors.</summary>
@@ -4931,8 +5217,20 @@ internal sealed partial class GlPanel : Control
         return Quaternion.Normalize(new Quaternion(c.X, c.Y, c.Z, 1f + d));
     }
 
-    private uint TextureFor(RigidBody b, ShapeType shape)
-        => b.IsStatic ? _texConcrete
+    private uint TextureFor(RigidBody b, in ChildShape child)
+    {
+        if (IsArenaWall(b)) return _texBrick;
+        if (IsWoodenCart(b)) return child.Shape == ShapeType.Sphere ? _texRustyMetal : _texCartWood;
+        if (string.Equals(b.Tag as string, "CatapultLauncher", StringComparison.Ordinal)) return child.Shape == ShapeType.Sphere ? _texRustyMetal : _texCartWood;
+        if (string.Equals(b.Tag as string, "BowlingPin", StringComparison.Ordinal)) return _texBowlingPin;
+        if (string.Equals(b.Tag as string, "Hammer", StringComparison.Ordinal))
+            return child.Shape == ShapeType.Box ? _texMetal : _texCartWood;
+        if (string.Equals(b.Tag as string, "Dumbbell", StringComparison.Ordinal)) return _texRustyMetal;
+        if (string.Equals(b.Tag as string, "WreckingBallTarget", StringComparison.Ordinal)) return _texRustyMetal;
+        if (string.Equals(b.Tag as string, "WreckingBallAnchor", StringComparison.Ordinal)) return _texRustyMetal;
+
+        ShapeType shape = child.Shape;
+        return b.IsStatic ? _texConcrete
          : IsExplosiveBarrel(b) ? _texBarrel
          : IsAndroidBody(b) ? _texAndroid
          : IsVehicleChassis(b) ? _texVehicle
@@ -4942,16 +5240,57 @@ internal sealed partial class GlPanel : Control
              MaterialId.Wood => _texCrate,
              MaterialId.Metal => _texMetal,
              MaterialId.Stone => _texConcrete,
-             MaterialId.Glass => _texStripes,
+             MaterialId.Glass => _texGlass,
              MaterialId.Ice => _texStripes,
              MaterialId.Synthetic => shape == ShapeType.Capsule ? _texMetal : _texAndroid,
              _ => shape switch
              {
-                 ShapeType.Sphere => _texStripes,
+                 ShapeType.Sphere => _texBall,
                  ShapeType.Capsule => _texMetal,
                  _ => _texCrate,
              },
          };
+    }
+
+    private uint BumpTextureFor(RigidBody b, in ChildShape child)
+    {
+        if (IsArenaWall(b)) return _bumpBrick;
+        if (IsExplosiveBarrel(b)) return _bumpBarrel;
+        if (IsWoodenCart(b)) return child.Shape == ShapeType.Sphere ? _bumpRustyMetal : _bumpCartWood;
+        if (string.Equals(b.Tag as string, "CatapultLauncher", StringComparison.Ordinal)) return child.Shape == ShapeType.Sphere ? _bumpRustyMetal : _bumpCartWood;
+        if (string.Equals(b.Tag as string, "BowlingPin", StringComparison.Ordinal)) return _bumpBowlingPin;
+        if (string.Equals(b.Tag as string, "Hammer", StringComparison.Ordinal))
+            return child.Shape == ShapeType.Box ? _bumpRustyMetal : _bumpCartWood;
+        if (string.Equals(b.Tag as string, "Dumbbell", StringComparison.Ordinal) || string.Equals(b.Tag as string, "WreckingBallTarget", StringComparison.Ordinal)) return _bumpRustyMetal;
+        if (IsVehicleChassis(b)) return _bumpVehicle;
+        if (IsVehicleWheel(b)) return _bumpTire;
+        if (b.MaterialId == MaterialId.Wood) return _bumpCrate;
+        if (b.MaterialId == MaterialId.Glass) return _bumpGlass;
+        if (child.Shape == ShapeType.Sphere && !IsVehicleWheel(b)) return _bumpBall;
+        return 0;
+    }
+
+    private float BumpStrengthFor(RigidBody b, in ChildShape child)
+    {
+        if (IsArenaWall(b)) return 0.72f;
+        if (IsExplosiveBarrel(b)) return 0.42f;
+        if (IsWoodenCart(b)) return child.Shape == ShapeType.Sphere ? 0.24f : 0.55f;
+        if (b.MaterialId == MaterialId.Wood || string.Equals(b.Tag as string, "Hammer", StringComparison.Ordinal)) return 0.52f;
+        if (string.Equals(b.Tag as string, "Dumbbell", StringComparison.Ordinal) || string.Equals(b.Tag as string, "WreckingBallTarget", StringComparison.Ordinal)) return 0.42f;
+        if (b.MaterialId == MaterialId.Glass) return 0.22f;
+        if (child.Shape == ShapeType.Sphere && !IsVehicleWheel(b)) return 0.24f;
+        if (IsVehicleChassis(b) || IsVehicleWheel(b)) return 0.18f;
+        return 0f;
+    }
+
+    private static bool IsArenaWall(RigidBody b)
+        => string.Equals(b.Tag as string, "ArenaWall", StringComparison.Ordinal);
+
+    private static bool IsBowlingPin(RigidBody b)
+        => string.Equals(b.Tag as string, "BowlingPin", StringComparison.Ordinal);
+
+    private static bool IsWoodenCart(RigidBody b)
+        => string.Equals(b.Tag as string, "WoodenCart", StringComparison.Ordinal);
 
     private static bool IsExplosiveBarrel(RigidBody b)
         => string.Equals(b.Tag as string, "ExplosiveBarrel", StringComparison.Ordinal)

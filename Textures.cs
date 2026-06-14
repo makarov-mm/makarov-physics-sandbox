@@ -1,11 +1,11 @@
+using System.Drawing;
+
 ﻿namespace MakarovPhysicsSandbox;
 
 /// <summary>
-/// Procedural textures, generated at startup. No image files, no loaders - a couple
-/// of hash functions and some sine waves go a surprisingly long way. Everything is
-/// kept light and mostly desaturated on purpose: the fragment shader multiplies the
-/// texel by the per-body tint color, so the texture provides pattern and the tint
-/// provides hue.
+/// Texture helpers. The project now prefers authored raster textures from the
+/// Textures/ folder and keeps procedural generators as safe fallbacks. Bump maps are
+/// loaded separately where available and sampled by the shader as height maps.
 /// </summary>
 internal static class Textures
 {
@@ -61,11 +61,13 @@ internal static class Textures
         return data;
     }
 
-    private static uint Upload(byte[] pixels, int size)
+    private static uint Upload(byte[] pixels, int size) => Upload(pixels, size, size);
+
+    private static uint Upload(byte[] pixels, int width, int height)
     {
         uint tex = GL.GenTexture();
         GL.BindTexture(GL.TEXTURE_2D, tex);
-        GL.TexImage2D(GL.TEXTURE_2D, 0, GL.RGBA8, size, size, 0, GL.RGBA, GL.UNSIGNED_BYTE, pixels);
+        GL.TexImage2D(GL.TEXTURE_2D, 0, GL.RGBA8, width, height, 0, GL.RGBA, GL.UNSIGNED_BYTE, pixels);
         GL.GenerateMipmap(GL.TEXTURE_2D);
         GL.TexParameteri(GL.TEXTURE_2D, GL.TEXTURE_MIN_FILTER, (int)GL.LINEAR_MIPMAP_LINEAR);
         GL.TexParameteri(GL.TEXTURE_2D, GL.TEXTURE_MAG_FILTER, (int)GL.LINEAR);
@@ -73,6 +75,41 @@ internal static class Textures
         GL.TexParameteri(GL.TEXTURE_2D, GL.TEXTURE_WRAP_T, (int)GL.REPEAT);
         return tex;
     }
+
+    private static uint LoadTextureFile(string fileName, Func<uint> fallback)
+    {
+        try
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "Textures", fileName);
+            if (!File.Exists(path))
+                path = Path.Combine("Textures", fileName);
+            if (!File.Exists(path)) return fallback();
+
+            using var src = new Bitmap(path);
+            using var bmp = new Bitmap(src.Width, src.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bmp))
+                g.DrawImage(src, 0, 0, src.Width, src.Height);
+
+            var data = new byte[bmp.Width * bmp.Height * 4];
+            int i = 0;
+            for (int y = 0; y < bmp.Height; y++)
+            for (int x = 0; x < bmp.Width; x++)
+            {
+                var c = bmp.GetPixel(x, y);
+                data[i++] = c.R;
+                data[i++] = c.G;
+                data[i++] = c.B;
+                data[i++] = c.A;
+            }
+            return Upload(data, bmp.Width, bmp.Height);
+        }
+        catch
+        {
+            return fallback();
+        }
+    }
+
+    public static uint LoadOrCreate(string fileName, Func<uint> fallback) => LoadTextureFile(fileName, fallback);
 
     /// <summary>Floor: a 2x2 checker block (tiles seamlessly under REPEAT) with subtle grain.</summary>
     public static uint CreateCheckerFloor(int size = 256)
@@ -92,28 +129,46 @@ internal static class Textures
         }), size);
     }
 
-    /// <summary>Wooden crate: horizontal planks, grain, darker frame around the edge.</summary>
+    /// <summary>Wooden crate/boards: warm procedural wood, planks, darker seams, diagonal braces and nail marks.</summary>
     public static uint CreateCrate(int size = 256)
     {
         return Upload(Generate(size, (u, v) =>
         {
-            const int planks = 4;
+            const int planks = 5;
             float pv = v * planks;
-            int plank = (int)pv;
+            int plank = (int)MathF.Floor(pv);
             float inPlank = pv - plank;
 
-            // each plank gets its own grain phase so they don't look like clones
-            float phase = Hash(plank, 17, 3) * 40f;
-            float grain = MathF.Sin((u * 26f + phase) + (Fbm(u * 5f, v * 18f, 21) - 0.5f) * 7f);
-            float wood = 0.80f + grain * 0.07f + (Fbm(u * 50f, v * 50f, 33) - 0.5f) * 0.08f;
+            float plankShift = (Hash(plank, 17, 3) - 0.5f) * 0.10f;
+            float grainBase = Fbm(u * 15f + plankShift, v * 44f, 21, 5);
+            float fine = MathF.Sin((u * 55f + grainBase * 10f + plankShift * 30f));
+            float wood = 0.70f + (grainBase - 0.5f) * 0.22f + fine * 0.045f;
 
-            if (inPlank < 0.05f || inPlank > 0.95f) wood *= 0.66f;  // plank seams
+            bool seam = inPlank < 0.035f || inPlank > 0.965f;
             float edge = MathF.Min(MathF.Min(u, 1f - u), MathF.Min(v, 1f - v));
-            if (edge < 0.06f) wood *= 0.62f;                        // crate frame
+            bool frame = edge < 0.070f;
+            bool braceA = MathF.Abs(u - v) < 0.030f;
+            bool braceB = MathF.Abs(u + v - 1f) < 0.030f;
+            bool nail = (Distance(u, v, 0.12f, 0.12f) < 0.016f) || (Distance(u, v, 0.88f, 0.12f) < 0.016f) ||
+                        (Distance(u, v, 0.12f, 0.88f) < 0.016f) || (Distance(u, v, 0.88f, 0.88f) < 0.016f);
 
-            // a hint of warmth so it reads as wood even under a gray tint
-            return (wood, wood * 0.88f, wood * 0.72f);
+            if (seam) wood *= 0.42f;
+            if (frame) wood *= 0.64f;
+            if (braceA || braceB) wood *= 0.72f;
+            if (nail) wood *= 0.20f;
+
+            // Keep it close to real wood, not toy-coloured blocks.
+            float r = wood * 0.86f;
+            float g = wood * 0.55f;
+            float b = wood * 0.30f;
+            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
         }), size);
+    }
+
+    private static float Distance(float x, float y, float cx, float cy)
+    {
+        float dx = x - cx, dy = y - cy;
+        return MathF.Sqrt(dx * dx + dy * dy);
     }
 
     /// <summary>Spheres: soft latitude stripes plus speckle.</summary>
@@ -247,4 +302,113 @@ internal static class Textures
             return (c, c, c);
         }), size);
     }
+    /// <summary>Gameplay balls: scuffed rubber/painted surface with subtle panel seams.</summary>
+    public static uint CreateBall(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float n = Fbm(u * 18f, v * 18f, 301, 5);
+            float lat = MathF.Abs(MathF.Sin(v * MathF.PI * 6f));
+            float lon = MathF.Abs(MathF.Sin(u * MathF.PI * 6f));
+            float seam = (lat < 0.045f || lon < 0.040f) ? 0.72f : 1f;
+            float scuff = Hash((int)(u * size), (int)(v * size), 313) > 0.985f ? 0.55f : 1f;
+            float val = (0.78f + (n - 0.5f) * 0.18f) * seam * scuff;
+            return (val, val * 0.96f, val * 0.86f);
+        }), size);
+    }
+
+    /// <summary>Bowling pin texture: white lacquer with red neck stripes and slight grime.</summary>
+    public static uint CreateBowlingPin(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float n = (Fbm(u * 18f, v * 22f, 331) - 0.5f) * 0.08f;
+            float r = 0.96f + n, g = 0.94f + n, b = 0.88f + n;
+            if ((v > 0.23f && v < 0.29f) || (v > 0.32f && v < 0.36f))
+            {
+                r = 0.86f; g = 0.10f; b = 0.08f;
+            }
+            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
+        }), size);
+    }
+
+    /// <summary>Brick wall: staggered bricks, dark mortar and rough surface for shader bumping.</summary>
+    public static uint CreateBrickWall(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            const float rows = 8f;
+            float rowF = v * rows;
+            int row = (int)MathF.Floor(rowF);
+            float y = rowF - row;
+            float cols = 8f;
+            float xF = (u + (row % 2) * 0.5f / cols) * cols;
+            float x = xF - MathF.Floor(xF);
+
+            bool mortar = x < 0.045f || x > 0.955f || y < 0.060f || y > 0.940f;
+            float rough = Fbm(u * 34f, v * 34f, 401, 5);
+            float shade = 0.78f + (rough - 0.5f) * 0.24f;
+            if (mortar)
+            {
+                float m = 0.34f + (rough - 0.5f) * 0.08f;
+                return (m, m * 1.02f, m * 1.06f);
+            }
+            float r = 0.56f * shade;
+            float g = 0.37f * shade;
+            float b = 0.27f * shade;
+            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
+        }), size);
+    }
+
+    /// <summary>Breakable glass: blue-tinted panel with cracks and reflective bands.</summary>
+    public static uint CreateGlassBlock(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float tint = 0.70f + (Fbm(u * 10f, v * 10f, 211) - 0.5f) * 0.08f;
+            float band = 0.08f * MathF.Max(0f, MathF.Sin((u + v) * MathF.PI * 5f));
+            bool crack = MathF.Abs(u - 0.32f - (v - 0.5f) * 0.25f) < 0.012f && v > 0.18f && v < 0.82f;
+            crack |= MathF.Abs(u - 0.68f + (v - 0.45f) * 0.38f) < 0.010f && v > 0.20f && v < 0.72f;
+            float r = 0.55f * tint + band;
+            float g = 0.82f * tint + band;
+            float b = 1.00f * tint + band;
+            if (crack) { r = 0.92f; g = 0.98f; b = 1.0f; }
+            return (Math.Clamp(r, 0f, 1f), Math.Clamp(g, 0f, 1f), Math.Clamp(b, 0f, 1f));
+        }), size);
+    }
+
+    /// <summary>Simple fake skybox texture: soft vertical gradient with sparse cloud noise.</summary>
+    public static uint CreateSkybox(int size = 256)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float horizon = Math.Clamp(1f - MathF.Abs(v - 0.48f) * 1.6f, 0f, 1f);
+            float cloud = MathF.Max(0f, Fbm(u * 5f, v * 3f, 241, 5) - 0.57f) * 1.8f;
+            float r = 0.07f + horizon * 0.18f + cloud * 0.20f;
+            float g = 0.11f + horizon * 0.20f + cloud * 0.22f;
+            float b = 0.17f + horizon * 0.24f + cloud * 0.25f;
+            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
+        }), size);
+    }
+
+
+    public static uint WoodCrateAlbedo() => LoadOrCreate("wood_crate_albedo.png", () => CreateCrate());
+    public static uint WoodCrateBump() => LoadOrCreate("wood_crate_bump.png", () => CreateCrate());
+    public static uint CartWoodAlbedo() => LoadOrCreate("cart_wood_albedo.png", () => CreateCrate());
+    public static uint CartWoodBump() => LoadOrCreate("cart_wood_bump.png", () => CreateCrate());
+    public static uint BrickWallAlbedo() => LoadOrCreate("brick_wall_albedo.png", () => CreateBrickWall());
+    public static uint BrickWallBump() => LoadOrCreate("brick_wall_bump.png", () => CreateBrickWall());
+    public static uint RustyMetalAlbedo() => LoadOrCreate("rusty_metal_albedo.png", () => CreateMetal());
+    public static uint RustyMetalBump() => LoadOrCreate("rusty_metal_bump.png", () => CreateMetal());
+    public static uint BallAlbedo() => LoadOrCreate("ball_albedo.png", () => CreateBall());
+    public static uint BallBump() => LoadOrCreate("ball_bump.png", () => CreateBall());
+    public static uint BowlingPinAlbedo() => LoadOrCreate("bowling_pin_albedo.png", () => CreateBowlingPin());
+    public static uint BowlingPinBump() => LoadOrCreate("bowling_pin_bump.png", () => CreateBowlingPin());
+    public static uint GlassAlbedo() => LoadOrCreate("glass_albedo.png", () => CreateGlassBlock());
+    public static uint GlassBump() => LoadOrCreate("glass_bump.png", () => CreateGlassBlock());
+    public static uint VehiclePaintAlbedo() => LoadOrCreate("vehicle_paint_albedo.png", () => CreateVehiclePaint());
+    public static uint VehiclePaintBump() => LoadOrCreate("vehicle_paint_bump.png", () => CreateVehiclePaint());
+    public static uint TireAlbedo() => LoadOrCreate("tire_albedo.png", () => CreateTire());
+    public static uint TireBump() => LoadOrCreate("tire_bump.png", () => CreateTire());
+
 }

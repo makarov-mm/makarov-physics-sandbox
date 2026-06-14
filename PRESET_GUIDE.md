@@ -141,3 +141,18 @@ New presets:
 - **Drone Target Range**: catapult launcher and multiple drone targets. Intended as a simple aiming/destruction toy.
 
 Design note: these are deliberately framed as toys/showcase objects, not as another deep system branch. The next step should be tuning and presentation, not adding more object categories.
+
+
+### 2026-06-14 — M4.6 visual realism / stability fix pass
+
+- Reworked texture assets again with explicit raster PNGs for sky, brick wall, crate wood, cart wood, rusty metal and explosive barrel.
+- The arena wall now uses a clearer brick texture and higher wall UV repetition so long wall segments no longer read as stretched rectangles.
+- Replaced the flat/gray skybox asset with a brighter cloud-sky texture.
+- Reworked the explosive barrel material toward a real painted metal drum: ribs, warning label, rust spots and a separate bump map.
+- Bowling pin red bands are now rendered as flattened round rings instead of red box geometry, so the pins no longer have square red artifacts.
+- Bowling pin visual scale now derives from the underlying capsule radius, so editor scaling affects both physics and the rendered visual.
+- The catapult launcher is now a single editable compound object instead of several separate static bodies; it can be selected, moved, rotated and scaled as one launcher.
+- Wooden cart wheel overlay was made more visible: more spokes, faster visual spin and a hub marker while keeping the stable compound-body physics.
+- Ragdoll joint-stress iteration now guards against mid-loop muscle removal after limb severing, fixing a crash observed when an android broke apart in/near the cart.
+
+Current visual rule: physics shapes may stay simplified, but important props can use richer visual overlays/textures when this improves readability.

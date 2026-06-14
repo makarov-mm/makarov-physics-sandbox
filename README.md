@@ -337,3 +337,18 @@ open one and inspect its trigger outputs to see the pattern.
     - Fullscreen player mode: right-side player GUI.
   - Added icons for `drone.png`, `bridge.png` and `catapult.png`.
   - Important scope note: this pass is still aligned with the current M4 GUI/player-facing direction. It does not add another complex simulator subsystem; it packages already useful bridge/catapult-style gameplay objects into accessible player-facing actions.
+
+
+### 2026-06-14 — M4.6 visual realism / stability fix pass
+
+- Reworked texture assets again with explicit raster PNGs for sky, brick wall, crate wood, cart wood, rusty metal and explosive barrel.
+- The arena wall now uses a clearer brick texture and higher wall UV repetition so long wall segments no longer read as stretched rectangles.
+- Replaced the flat/gray skybox asset with a brighter cloud-sky texture.
+- Reworked the explosive barrel material toward a real painted metal drum: ribs, warning label, rust spots and a separate bump map.
+- Bowling pin red bands are now rendered as flattened round rings instead of red box geometry, so the pins no longer have square red artifacts.
+- Bowling pin visual scale now derives from the underlying capsule radius, so editor scaling affects both physics and the rendered visual.
+- The catapult launcher is now a single editable compound object instead of several separate static bodies; it can be selected, moved, rotated and scaled as one launcher.
+- Wooden cart wheel overlay was made more visible: more spokes, faster visual spin and a hub marker while keeping the stable compound-body physics.
+- Ragdoll joint-stress iteration now guards against mid-loop muscle removal after limb severing, fixing a crash observed when an android broke apart in/near the cart.
+
+Current visual rule: physics shapes may stay simplified, but important props can use richer visual overlays/textures when this improves readability.

@@ -300,6 +300,9 @@ internal sealed class RagdollSystem
         // Iterate backwards because DamageBone can sever and remove muscles.
         for (int i = rag.Muscles.Count - 1; i >= 0; i--)
         {
+            // DamageBone/SeverBone can remove muscles or Kill() can clear the list completely.
+            // Guard the index every iteration so a mid-loop sever does not crash the simulation.
+            if (i >= rag.Muscles.Count) continue;
             var m = rag.Muscles[i];
             var bone = m.ChildBone;
             if (bone.Severed) continue;
@@ -319,6 +322,7 @@ internal sealed class RagdollSystem
 
             float dmg = (stress - limit) * JointDamagePerSpeed * Math.Clamp(dt * 60f, 0.35f, 1.35f);
             DamageBone(bone, dmg, world);
+            if (!rag.Alive || rag.Muscles.Count == 0) break;
         }
     }
 

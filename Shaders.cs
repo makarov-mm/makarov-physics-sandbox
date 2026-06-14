@@ -85,8 +85,39 @@ internal static class Shaders
         uniform vec3 uCamPos;
         uniform sampler2D uShadowMap; // unit 0
         uniform sampler2D uAlbedo;    // unit 1
+        uniform sampler2D uBumpMap;   // unit 2, optional grayscale height map
+        uniform float uUseBumpMap;    // 1 = sample uBumpMap, 0 = derive height from albedo
         uniform float uAlpha;         // <1 for translucent water
         uniform float uEmissive;      // 1 = ignore lighting (glowing sparks)
+        uniform float uBumpStrength;  // lightweight texture-height bump for wood/brick/balls
+
+        float TextureHeight(vec2 uv)
+        {
+            if (uUseBumpMap > 0.5) return texture(uBumpMap, uv).r;
+            vec3 c = texture(uAlbedo, uv).rgb;
+            return dot(c, vec3(0.299, 0.587, 0.114));
+        }
+
+        vec3 ApplyTextureBump(vec3 n)
+        {
+            if (uBumpStrength <= 0.001) return n;
+
+            vec3 dp1 = dFdx(vWorldPos);
+            vec3 dp2 = dFdy(vWorldPos);
+            vec2 duv1 = dFdx(vUV);
+            vec2 duv2 = dFdy(vUV);
+            float det = duv1.x * duv2.y - duv1.y * duv2.x;
+            if (abs(det) < 0.00001) return n;
+
+            vec3 tangent = normalize((dp1 * duv2.y - dp2 * duv1.y) / det);
+            vec3 bitangent = normalize((-dp1 * duv2.x + dp2 * duv1.x) / det);
+            vec2 texel = 1.0 / vec2(textureSize(uAlbedo, 0));
+
+            float hx = TextureHeight(vUV + vec2(texel.x, 0.0)) - TextureHeight(vUV - vec2(texel.x, 0.0));
+            float hy = TextureHeight(vUV + vec2(0.0, texel.y)) - TextureHeight(vUV - vec2(0.0, texel.y));
+            vec3 bumped = n - (tangent * hx + bitangent * hy) * uBumpStrength * 5.0;
+            return normalize(bumped);
+        }
 
         float ShadowFactor(vec3 n, vec3 l)
         {
@@ -108,7 +139,7 @@ internal static class Shaders
 
         void main()
         {
-            vec3 n = normalize(vNormal);
+            vec3 n = ApplyTextureBump(normalize(vNormal));
             vec3 l = normalize(-uLightDir);
             vec3 v = normalize(uCamPos - vWorldPos);
             vec3 h = normalize(l + v);
@@ -117,11 +148,14 @@ internal static class Shaders
             vec3 base = texture(uAlbedo, vUV).rgb * uColor;
 
             float diff = max(dot(n, l), 0.0);
-            float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.35;
+            float spec = pow(max(dot(n, h), 0.0), 56.0) * 0.42;
+            float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.10;
             float shadow = ShadowFactor(n, l);
             float lit = 1.0 - shadow;
 
-            vec3 color = base * (0.28 + 0.85 * diff * lit) + vec3(1.0) * spec * lit;
+            // Slightly richer lighting: warm key light, cool sky fill and a small rim term.
+            vec3 skyFill = vec3(0.34, 0.40, 0.48) * max(n.y * 0.5 + 0.5, 0.0);
+            vec3 color = base * (0.20 + skyFill * 0.22 + 0.92 * diff * lit) + vec3(1.0, 0.96, 0.88) * spec * lit + base * rim;
             color = mix(color, base, uEmissive); // sparks ignore the lighting and just glow
 
             // mild distance fog so the floor edge fades out
