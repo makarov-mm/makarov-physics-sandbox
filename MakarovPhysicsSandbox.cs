@@ -1,3 +1,5 @@
+using MakarovPhysicsSandbox.Core;
+
 namespace MakarovPhysicsSandbox
 {
     public partial class MakarovPhysicsSandbox : Form

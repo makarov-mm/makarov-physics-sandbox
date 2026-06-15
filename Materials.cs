@@ -1,8 +1,9 @@
+using MakarovPhysicsSandbox.Physics;
 using System.Numerics;
 
 namespace MakarovPhysicsSandbox;
 
-internal enum MaterialId
+public enum MaterialId
 {
     Custom,
     Wood,
@@ -17,7 +18,7 @@ internal enum MaterialId
     Explosive,
 }
 
-internal sealed record MaterialDefinition(
+public sealed record MaterialDefinition(
     MaterialId Id,
     string DisplayName,
     float Density,
@@ -52,7 +53,7 @@ internal sealed record MaterialDefinition(
     }
 }
 
-internal static class Materials
+public static class Materials
 {
     public static readonly MaterialDefinition[] All =
     {

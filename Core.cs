@@ -1,158 +1,10 @@
+using MakarovPhysicsSandbox.Physics;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using MakarovPhysicsSandbox.Core;
 
 namespace MakarovPhysicsSandbox;
-
-internal enum ActiveForceFieldKind { None, Attractor, Repeller, Wind }
-
-internal enum PendingSceneActionKind { None, SpawnBody, BowlingPins, Chain, Explosion, Attractor, Repeller, Wind, Connect, Spring, Disconnect, Ragdoll, Android, Vehicle, PoliceVehicle, Ambulance, DroneTarget, BridgeSpan, CatapultLauncher, WoodenCart, GlassBlock, WreckingBallTarget, ExplosiveBarrel, Cylinder, BeachBall, MetalCube, GasCylinder, SentinelBot, Motor, Gate, Timer, Conveyor, Piston, SlidingDoor, Ignite, Electrify }
-
-
-internal enum TriggerActionKind { Explosion, Wind, ToggleGravity, ToggleAttractor, ToggleRepeller, StartMotor, OpenGate, StartTimer, StartConveyor, StartPiston, ToggleDoor, LaunchCatapult }
-
-internal static class SceneId
-{
-    public static string New(string prefix) => $"{prefix}_{Guid.NewGuid():N}"[..Math.Min(prefix.Length + 1 + 12, prefix.Length + 33)];
-}
-
-internal sealed class TriggerOutput
-{
-    public string TargetId = "";
-    public string TargetName = "";
-    public TriggerActionKind Action = TriggerActionKind.Explosion;
-    public float Delay;
-    public float Radius = 5.0f;
-    public float Strength = 10.0f;
-    public bool Enabled = true;
-}
-
-internal sealed class SelectedTriggerOutputSnapshot
-{
-    public int Index { get; init; }
-    public string TargetId { get; init; } = "";
-    public string TargetName { get; init; } = "";
-    public TriggerActionKind Action { get; init; }
-    public float Delay { get; init; }
-    public float Radius { get; init; }
-    public float Strength { get; init; }
-    public bool Enabled { get; init; }
-
-    public override string ToString()
-    {
-        string target = string.IsNullOrWhiteSpace(TargetName) ? (string.IsNullOrWhiteSpace(TargetId) ? "legacy target" : TargetId) : TargetName;
-        string delay = Delay > 0.01f ? $" +{Delay:0.##}s" : "";
-        string state = Enabled ? "" : " [off]";
-        return $"{Index + 1}. {Action} -> {target}{delay}{state}";
-    }
-}
-
-internal enum EditorToolMode { Select, Move, Rotate, Scale }
-
-internal sealed class SelectedTriggerSnapshot
-{
-    public string Id { get; init; } = "";
-    public string Name { get; init; } = "Trigger";
-    public Vector3 Position { get; init; }
-    public Vector3 HalfExtents { get; init; }
-    public TriggerActionKind Action { get; init; }
-    public bool OneShot { get; init; }
-    public bool Enabled { get; init; }
-    public float Radius { get; init; }
-    public float Strength { get; init; }
-    public float CooldownSeconds { get; init; }
-    public Vector3 TargetPosition { get; init; }
-    public int OutputCount { get; init; }
-    public List<SelectedTriggerOutputSnapshot> Outputs { get; init; } = [];
-}
-
-internal sealed class SelectedTriggerProperties
-{
-    public string Name { get; init; } = "Trigger";
-    public Vector3 Position { get; init; }
-    public Vector3 HalfExtents { get; init; }
-    public TriggerActionKind Action { get; init; }
-    public bool OneShot { get; init; }
-    public bool Enabled { get; init; }
-    public float Radius { get; init; }
-    public float Strength { get; init; }
-    public float CooldownSeconds { get; init; }
-    public Vector3 TargetPosition { get; init; }
-}
-
-internal sealed class SceneTrigger
-{
-    public string Id = SceneId.New("trigger");
-    public string Name = "Trigger";
-    public string DisplayName
-    {
-        get => string.IsNullOrWhiteSpace(Name) ? Id : Name;
-        set => Name = value;
-    }
-    public readonly List<TriggerOutput> Outputs = new();
-    public Vector3 Position;
-    public Vector3 HalfExtents = new(0.9f, 0.08f, 0.9f);
-    public TriggerActionKind Action = TriggerActionKind.Explosion;
-    public bool OneShot;
-    public bool Enabled = true;
-    public bool WasPressed;
-    public float Cooldown;
-    public float CooldownSeconds = 1.0f;
-    public float Pulse;
-    public float Radius = 5.0f;
-    public float Strength = 10.0f;
-    public Vector3 TargetOffset;
-
-    public Vector3 TargetPosition
-    {
-        get => Position + TargetOffset;
-        set => TargetOffset = value - Position;
-    }
-}
-
-internal sealed class ScheduledTriggerOutput
-{
-    public string SourceName = "Trigger";
-    public TriggerOutput Output = new();
-    public Vector3 FallbackTargetPosition;
-    public float Remaining;
-}
-
-internal sealed class SelectedBodySnapshot
-{
-    public bool IsStatic { get; init; }
-    public int ChildCount { get; init; }
-    public float Mass { get; init; }
-    public MaterialId MaterialId { get; init; }
-    public float Density { get; init; }
-    public float Friction { get; init; }
-    public float Restitution { get; init; }
-    public Vector3 Position { get; init; }
-    public Vector3 Velocity { get; init; }
-    public Vector3 Color { get; init; }
-    public bool Breakable { get; init; }
-    public float BreakThreshold { get; init; }
-    public float Flammability { get; init; }
-    public float Conductivity { get; init; }
-    public float ExplosivePower { get; init; }
-}
-
-internal sealed class SelectedBodyProperties
-{
-    public bool IsStatic { get; init; }
-    public MaterialId MaterialId { get; init; }
-    public float Density { get; init; }
-    public float Friction { get; init; }
-    public float Restitution { get; init; }
-    public Vector3 Position { get; init; }
-    public Vector3 Velocity { get; init; }
-    public Vector3 Color { get; init; }
-    public bool Breakable { get; init; }
-    public float BreakThreshold { get; init; }
-    public float Flammability { get; init; }
-    public float Conductivity { get; init; }
-    public float ExplosivePower { get; init; }
-}
 
 /// <summary>
 /// A WinForms control that owns an OpenGL context on its OWN window handle and runs the
@@ -242,7 +94,7 @@ internal sealed partial class GlPanel : Control
     private const int ShadowSize = 2048;
 
     private int _uModel, _uView, _uProj, _uLightVP, _uColor, _uLightDir, _uCamPos, _uShadowMap, _uAlbedo, _uBumpMap, _uUseBumpMap, _uUvScale, _uWorldUv, _uAlpha, _uEmissive, _uBumpStrength, _uTime, _uWaterWaveAmp, _uRippleCount, _uRipples;
-    private readonly float[] _rippleBuffer = new float[WaterVolume.MaxRipples * 4];
+    private readonly float[] _rippleBuffer = new float[WaterVolume.MAX_RIPPLES * 4];
     private int _dModel, _dLightVP;
 
     // ---- camera (orbit) ----
@@ -5605,7 +5457,7 @@ internal sealed partial class GlPanel : Control
               * Matrix4x4.CreateTranslation(w.Center.X, w.SurfaceY, w.Center.Z);
         GL.Uniform1(_uTime, w.Time);
         GL.Uniform1(_uWaterWaveAmp, w.WaveAmplitude);
-        int rc = w.FillRipples(_rippleBuffer, WaterVolume.MaxRipples);
+        int rc = w.FillRipples(_rippleBuffer, WaterVolume.MAX_RIPPLES);
         GL.Uniform1(_uRippleCount, rc);
         if (rc > 0) GL.Uniform4(_uRipples, rc, _rippleBuffer);
         GL.UniformMatrix4(_uModel, ToArray(m));

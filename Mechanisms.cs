@@ -1,4 +1,6 @@
+using MakarovPhysicsSandbox.Physics;
 using System.Numerics;
+using MakarovPhysicsSandbox.Core;
 
 namespace MakarovPhysicsSandbox;
 
@@ -1031,7 +1033,7 @@ internal sealed partial class GlPanel
     }
 }
 
-internal sealed class SceneMechanismDto
+public sealed class SceneMechanismDto
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Mechanism";
