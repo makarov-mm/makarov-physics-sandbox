@@ -378,16 +378,29 @@ internal static class Textures
     }
 
     /// <summary>Simple fake skybox texture: soft vertical gradient with sparse cloud noise.</summary>
-    public static uint CreateSkybox(int size = 256)
+    public static uint CreateSkybox(int size = 512)
     {
         return Upload(Generate(size, (u, v) =>
         {
-            float horizon = Math.Clamp(1f - MathF.Abs(v - 0.48f) * 1.6f, 0f, 1f);
-            float cloud = MathF.Max(0f, Fbm(u * 5f, v * 3f, 241, 5) - 0.57f) * 1.8f;
-            float r = 0.07f + horizon * 0.18f + cloud * 0.20f;
-            float g = 0.11f + horizon * 0.20f + cloud * 0.22f;
-            float b = 0.17f + horizon * 0.24f + cloud * 0.25f;
-            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
+            // Vertical gradient: pale at the horizon (v=0.5) -> rich blue at the zenith (v=1).
+            // NOTE: this 2D image is mapped onto a cube, so we deliberately avoid a localised sun
+            // disc (it would repeat on all six faces). A single real sun needs a direction-based
+            // sky shader instead. Here we keep a clean gradient + soft layered clouds.
+            float h = Math.Clamp((v - 0.5f) / 0.5f, 0f, 1f);
+            float r = 0.62f + (0.22f - 0.62f) * h;
+            float g = 0.78f + (0.44f - 0.78f) * h;
+            float b = 0.95f + (0.82f - 0.95f) * h;
+
+            // soft layered clouds above the horizon (two octaves of fbm, gently banded)
+            float aboveH = Math.Clamp((v - 0.5f) * 3.5f, 0f, 1f);
+            float c1 = Fbm(u * 4f, v * 3f, 241, 5);
+            float c2 = Fbm(u * 9f + 11f, v * 6f, 613, 4);
+            float cloud = Math.Clamp((c1 * 0.65f + c2 * 0.35f - 0.50f) * 2.8f, 0f, 1f) * aboveH;
+            r += (1.0f - r) * cloud * 0.92f;
+            g += (1.0f - g) * cloud * 0.92f;
+            b += (1.0f - b) * cloud * 0.94f;
+
+            return (Math.Clamp(r, 0f, 1f), Math.Clamp(g, 0f, 1f), Math.Clamp(b, 0f, 1f));
         }), size);
     }
 

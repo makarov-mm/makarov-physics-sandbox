@@ -639,7 +639,7 @@ internal sealed partial class GlPanel
 
     private void DrawConveyorMarker(SceneMechanism m, float t)
     {
-        var p = m.Position + new Vector3(0, 0.13f, 0);
+        var p = m.Position + new Vector3(0, 0.085f, 0);   // sit on the belt top (box half-height 0.08), not above it
         var dir = m.MotorAxis.LengthSquared() < 1e-6f ? Vector3.UnitX : Vector3.Normalize(m.MotorAxis);
         float flow = (t * MathF.Max(0.2f, m.Strength)) % 1.0f;
         var color = m.Active ? new Vector3(0.25f, 0.90f, 1.0f) : new Vector3(0.18f, 0.36f, 0.42f);

@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace MakarovPhysicsSandbox;
 
@@ -237,7 +235,7 @@ internal sealed partial class GlPanel : Control
 
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
-    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _planeMesh = null!, _waterMesh = null!;
+    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _planeMesh = null!, _waterMesh = null!;
     private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal, _texBeachBall, _texMetalCube, _texGasCylinder;
     private uint _bumpCrate, _bumpBrick, _bumpCartWood, _bumpRustyMetal, _bumpBall, _bumpBowlingPin, _bumpGlass, _bumpVehicle, _bumpTire, _bumpBarrel, _bumpBeachBall, _bumpMetalCube, _bumpGasCylinder;
     private uint _shadowFbo, _shadowTex;
@@ -252,6 +250,8 @@ internal sealed partial class GlPanel : Control
     private readonly Vector3 _camTarget = new(0, 2, 0);
     private Vector3 _camPos;
     private Matrix4x4 _view, _proj;
+    private uint _skyProgram;
+    private int _uSkyModel, _uSkyView, _uSkyProj, _uSkyCamPos, _uSkyTime;
 
     // ---- input state ----
     private bool _rmbDown;
@@ -275,6 +275,13 @@ internal sealed partial class GlPanel : Control
     private int _toolDragStartX, _toolDragStartY;
     private Vector3 _toolStartPos;
     private Quaternion _toolStartRot;
+    // Rotating a jointed assembly (bridge, vehicle, cart) must move the whole group rigidly,
+    // including world-anchored joint points, or the joints tear it apart. Captured at drag start.
+    private readonly List<RigidBody> _rotGroup = new();
+    private Vector3[] _rotStartPos = Array.Empty<Vector3>();
+    private Quaternion[] _rotStartRot = Array.Empty<Quaternion>();
+    private readonly List<Joint> _rotAnchorJoints = new();
+    private Vector3[] _rotAnchorStart = Array.Empty<Vector3>();
     private float _toolLastScaleFactor = 1f;
     private Vector3 _aimPoint;
     private bool _aimValid;
@@ -288,6 +295,7 @@ internal sealed partial class GlPanel : Control
         public Vector3 Pos, Vel, Color;
         public float Life, MaxLife, Size;
         public bool Gravity;
+        public bool Smoke;     // smoke renders non-emissive and expands as it ages
     }
 
     private struct Beam
@@ -743,6 +751,7 @@ internal sealed partial class GlPanel : Control
 
         if (_stepOnce) { _world.Step(PhysicsWorld.FixedStep); _stepOnce = false; }
         else if (!_paused) _world.Step(_slowMo ? dt * 0.2f : dt);
+        LockWheelAxes();
 
         float simDt = _paused ? 0f : (_slowMo ? dt * 0.2f : dt);
         UpdateMechanisms(simDt);
@@ -1024,6 +1033,18 @@ internal sealed partial class GlPanel : Control
         GL.Enable(GL.MULTISAMPLE);
 
         _mainProgram = Shaders.Build(Shaders.MainVertex, Shaders.MainFragment);
+        // Optional direction-based sky program. If it fails to build, _skyProgram stays 0 and
+        // DrawSkybox falls back to the textured cube, so a GLSL issue can never break the renderer.
+        try
+        {
+            _skyProgram = Shaders.Build(Shaders.SkyVertex, Shaders.SkyFragment);
+            _uSkyModel = GL.GetUniformLocation(_skyProgram, "uModel");
+            _uSkyView = GL.GetUniformLocation(_skyProgram, "uView");
+            _uSkyProj = GL.GetUniformLocation(_skyProgram, "uProj");
+            _uSkyCamPos = GL.GetUniformLocation(_skyProgram, "uCamPos");
+            _uSkyTime = GL.GetUniformLocation(_skyProgram, "uTime");
+        }
+        catch { _skyProgram = 0; }
         _depthProgram = Shaders.Build(Shaders.DepthVertex, Shaders.DepthFragment);
 
         _uModel = GL.GetUniformLocation(_mainProgram, "uModel");
@@ -1086,6 +1107,7 @@ internal sealed partial class GlPanel : Control
         _cubeMesh = Mesh.CreateCube();
         _sphereMesh = Mesh.CreateSphere();
         _capsuleMesh = Mesh.CreateCapsule();
+        _cylinderMesh = Mesh.CreateCylinder();
         _planeMesh = Mesh.CreatePlane();
         _waterMesh = Mesh.CreateGridPlane(64);
 
@@ -2115,7 +2137,7 @@ internal sealed partial class GlPanel : Control
         ramp.Color = new Vector3(0.38f, 0.40f, 0.45f);
         _world.Bodies.Add(ramp);
 
-        var rig = MakeVehicle(new Vector3(-6.7f, 0.72f, 0f), 1.0f);
+        var rig = MakeVehicle(new Vector3(-6.7f, 2.4f, 0f), 1.0f);
         foreach (var b in rig.Bodies)
         {
             b.Velocity = new Vector3(5.2f, 0f, 0f);
@@ -2364,9 +2386,9 @@ internal sealed partial class GlPanel : Control
     private static RigidBody MakeDumbbell(Vector3 pos, float k = 1f)
     {
         var b = WithMaterial(RigidBody.CreateCompound(pos, [
-            ChildShape.Capsule(0.13f * k, Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f)),
-            ChildShape.Sphere(0.32f * k, new Vector3(-0.42f * k, 0, 0)),
-            ChildShape.Sphere(0.32f * k, new Vector3( 0.42f * k, 0, 0)),
+            ChildShape.Box(new Vector3(0.40f * k, 0.06f * k, 0.06f * k)),    // thin handle along X
+            ChildShape.Sphere(0.27f * k, new Vector3(-0.44f * k, 0, 0)),     // weights overlap the handle ends
+            ChildShape.Sphere(0.27f * k, new Vector3( 0.44f * k, 0, 0)),
         ], density: 2.2f), MaterialId.Metal);
         b.Tag = "Dumbbell";
         b.Color = new Vector3(0.82f, 0.84f, 0.86f);
@@ -2376,12 +2398,14 @@ internal sealed partial class GlPanel : Control
     private static RigidBody MakeHammer(Vector3 pos, float k = 1f)
     {
         var b = RigidBody.CreateCompound(pos, [
-            ChildShape.Capsule(0.085f * k, Vector3.Zero, Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f)),
-            // the head overlaps the handle slightly so the object reads as a real hammer, not two separated props.
-            ChildShape.Box(new Vector3(0.17f * k, 0.22f * k, 0.34f * k), new Vector3(0.48f * k, 0, 0)),
+            ChildShape.Box(new Vector3(0.34f * k, 0.05f * k, 0.05f * k)),                       // handle along X
+            // head sits at the end of the handle and overlaps it, so they read as one tool
+            // (previously the capsule handle ended short of the head, leaving a visible gap).
+            ChildShape.Box(new Vector3(0.12f * k, 0.17f * k, 0.26f * k), new Vector3(0.36f * k, 0, 0)),
         ], density: 2.6f);
         b.MaterialId = MaterialId.Wood;
         b.Tag = "Hammer";
+        b.Breakable = false;   // a tool, not a breakable prop: it should survive falls intact
         b.Color = Vector3.One;
         return b;
     }
@@ -2473,7 +2497,7 @@ internal sealed partial class GlPanel : Control
         if (vehicle.Bodies.Count > 0)
         {
             vehicle.Bodies[0].Tag = "PoliceVehicleChassis";
-            vehicle.Bodies[0].Color = Vector3.One;
+            vehicle.Bodies[0].Color = new Vector3(0.20f, 0.34f, 0.82f);
         }
         foreach (var b in vehicle.Bodies) _world.Bodies.Add(b);
         foreach (var j in vehicle.Joints) _world.Joints.Add(j);
@@ -2498,8 +2522,8 @@ internal sealed partial class GlPanel : Control
     private void SpawnExplosiveBarrelAtAim()
     {
         EvictIfFull();
-        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.72f, 0f);
-        var barrel = WithMaterial(MakeBreakable(RigidBody.CreateCapsule(p, 0.36f, density: 1.05f), threshold: 2.6f, pieces: 10), MaterialId.Explosive);
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.66f, 0f);
+        var barrel = WithMaterial(MakeBreakable(RigidBody.CreateBox(p, new Vector3(0.36f, 0.62f, 0.36f), density: 1.05f), threshold: 2.6f, pieces: 10), MaterialId.Explosive);
         barrel.Color = new Vector3(1.0f, 1.0f, 1.0f);
         barrel.Tag = "ExplosiveBarrel";
         barrel.Restitution = 0.18f;
@@ -2535,7 +2559,6 @@ internal sealed partial class GlPanel : Control
         ball.Color = Vector3.One;
         ball.Restitution = 0.92f;
         ball.Friction = 0.28f;
-        //ball.Buoyancy = MathF.Max(ball.Buoyancy, 0.85f);
         ball.Flammability = 0.08f;
         _world.Bodies.Add(ball);
         StatusUpdated?.Invoke("Placed beach ball. Light, bouncy and buoyant.");
@@ -2704,12 +2727,15 @@ internal sealed partial class GlPanel : Control
         _world.Bodies.Add(body);
         parts.Add(body);
 
+        // Wheels sit OUTBOARD of the side rails. Previously they overlapped the rails, and
+        // since jointed bodies still collide, the solver fought that overlap and the cart
+        // could jam in place instead of rolling.
         Vector3[] wheelOffsets =
         {
-            new(-0.86f, -0.10f, -0.62f),
-            new( 0.86f, -0.10f, -0.62f),
-            new(-0.86f, -0.10f,  0.62f),
-            new( 0.86f, -0.10f,  0.62f),
+            new(-0.80f, -0.10f, -1.02f),
+            new( 0.80f, -0.10f, -1.02f),
+            new(-0.80f, -0.10f,  1.02f),
+            new( 0.80f, -0.10f,  1.02f),
         };
         foreach (var off in wheelOffsets)
         {
@@ -3739,23 +3765,22 @@ internal sealed partial class GlPanel : Control
             }
 
             // Smoke: slower, larger, less bright. Androids produce cooler gray/blue smoke.
-            if (_rng.NextDouble() < 7.0 * dt && _particles.Count < MaxParticles)
+            if (_rng.NextDouble() < 2.0 * dt && _particles.Count < MaxParticles)
             {
                 var jitter = RandomUnit() * (0.12f + scale * 0.15f);
                 jitter.Y = MathF.Abs(jitter.Y) + scale * 0.15f;
                 var smokeColor = android
                     ? new Vector3(0.30f, 0.34f, 0.38f)
                     : new Vector3(0.20f, 0.19f, 0.17f);
-                AddParticle(
+                AddSmokeParticle(
                     b.Position + jitter,
                     new Vector3(
                         ((float)_rng.NextDouble() - 0.5f) * 0.18f,
                         0.65f + (float)_rng.NextDouble() * 0.65f,
                         ((float)_rng.NextDouble() - 0.5f) * 0.18f),
                     smokeColor,
-                    0.85f + (float)_rng.NextDouble() * 0.55f,
-                    0.13f + scale * 0.08f,
-                    false);
+                    1.1f + (float)_rng.NextDouble() * 0.8f,
+                    0.16f + scale * 0.10f);
             }
 
             // Embers/sparks sell synthetic android burning better than generic orange fire.
@@ -3963,6 +3988,22 @@ internal sealed partial class GlPanel : Control
         }
     }
 
+    private void AddSmokeParticle(Vector3 pos, Vector3 vel, Vector3 color, float life, float size)
+    {
+        if (_particles.Count >= MaxParticles) return;
+        _particles.Add(new Particle
+        {
+            Pos = pos,
+            Vel = vel,
+            Color = color,
+            Life = life,
+            MaxLife = MathF.Max(life, 1e-4f),
+            Size = size,
+            Gravity = false,
+            Smoke = true,
+        });
+    }
+
     private void AddParticle(Vector3 pos, Vector3 vel, Vector3 color, float life, float size, bool gravity)
     {
         if (_particles.Count >= MaxParticles) return;
@@ -4010,6 +4051,19 @@ internal sealed partial class GlPanel : Control
                 Size = 0.08f + (float)_rng.NextDouble() * 0.08f,
                 Gravity = false,
             });
+        }
+
+        // rising smoke cloud left behind by the blast
+        for (int i = 0; i < 8 && _particles.Count < MaxParticles; i++)
+        {
+            var dir = RandomUnit();
+            dir.Y = MathF.Abs(dir.Y) * 0.5f + 0.2f;
+            AddSmokeParticle(
+                center + RandomUnit() * radius * 0.3f,
+                Vector3.Normalize(dir) * (1.2f + (float)_rng.NextDouble() * 1.8f),
+                new Vector3(0.16f, 0.15f, 0.14f),
+                1.3f + (float)_rng.NextDouble() * 0.9f,
+                0.18f + (float)_rng.NextDouble() * 0.16f + radius * 0.05f);
         }
 
         for (int i = 0; i < 28 && _particles.Count < MaxParticles; i++)
@@ -4433,6 +4487,39 @@ internal sealed partial class GlPanel : Control
         _toolStartPos = _selectedBody.Position;
         _toolStartRot = _selectedBody.Rotation;
         _toolLastScaleFactor = 1f;
+        BuildRotationGroup();
+    }
+
+    // Collect every body reachable from the selection through joints, plus the world anchor
+    // points of any world-anchored joints, so the whole assembly can be rotated as one rigid unit.
+    private void BuildRotationGroup()
+    {
+        _rotGroup.Clear();
+        _rotAnchorJoints.Clear();
+        if (_selectedBody == null) return;
+
+        var seen = new HashSet<RigidBody> { _selectedBody };
+        var stack = new Stack<RigidBody>();
+        stack.Push(_selectedBody);
+        while (stack.Count > 0)
+        {
+            var cur = stack.Pop();
+            _rotGroup.Add(cur);
+            foreach (var j in _world.Joints)
+            {
+                RigidBody? other = j.A == cur ? j.B : (j.B == cur ? j.A : null);
+                if (other != null && seen.Add(other)) stack.Push(other);
+            }
+        }
+
+        foreach (var j in _world.Joints)
+            if (j.B == null && _rotGroup.Contains(j.A)) _rotAnchorJoints.Add(j);
+
+        _rotStartPos = new Vector3[_rotGroup.Count];
+        _rotStartRot = new Quaternion[_rotGroup.Count];
+        for (int i = 0; i < _rotGroup.Count; i++) { _rotStartPos[i] = _rotGroup[i].Position; _rotStartRot[i] = _rotGroup[i].Rotation; }
+        _rotAnchorStart = new Vector3[_rotAnchorJoints.Count];
+        for (int i = 0; i < _rotAnchorJoints.Count; i++) _rotAnchorStart[i] = _rotAnchorJoints[i].LocalB;
     }
 
     private void UpdateEditorToolDrag(int mx, int my)
@@ -4452,8 +4539,27 @@ internal sealed partial class GlPanel : Control
 
             case EditorToolMode.Rotate:
                 float angle = (mx - _toolDragStartX) * 0.015f;
-                b.Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitY, angle) * _toolStartRot);
-                b.AngularVelocity = Vector3.Zero;
+                var dq = Quaternion.CreateFromAxisAngle(Vector3.UnitY, angle);
+                if (_rotGroup.Count <= 1)
+                {
+                    b.Rotation = Quaternion.Normalize(dq * _toolStartRot);
+                    b.AngularVelocity = Vector3.Zero;
+                }
+                else
+                {
+                    var pivot = _toolStartPos;
+                    for (int i = 0; i < _rotGroup.Count; i++)
+                    {
+                        var body = _rotGroup[i];
+                        body.Position = pivot + Vector3.Transform(_rotStartPos[i] - pivot, dq);
+                        body.Rotation = Quaternion.Normalize(dq * _rotStartRot[i]);
+                        body.Velocity = Vector3.Zero;
+                        body.AngularVelocity = Vector3.Zero;
+                        body.UpdateDerived();
+                    }
+                    for (int i = 0; i < _rotAnchorJoints.Count; i++)
+                        _rotAnchorJoints[i].LocalB = pivot + Vector3.Transform(_rotAnchorStart[i] - pivot, dq);
+                }
                 break;
 
             case EditorToolMode.Scale:
@@ -4717,18 +4823,31 @@ internal sealed partial class GlPanel : Control
                 GL.Uniform1(_uWorldUv, worldTile ? 1f : 0f);
                 if (b.IsStatic)
                     GL.Uniform1(_uUvScale, worldTile ? (IsArenaWall(b) ? WallBrickDensity : StaticSurfaceDensity) : 6f);
-                GL.UniformMatrix4(_uModel, ToArray(ModelMatrix(b, in child)));
-                MeshFor(child.Shape).Draw();
-                if (IsExplosiveBarrel(b) && child.Shape == ShapeType.Capsule)
-                    DrawExplosiveBarrelOverlay(b, in child);
-                else if (IsAndroidBody(b))
-                    DrawAndroidOverlay(b, in child);
-                else if (IsVehicleChassis(b))
-                    DrawVehicleChassisOverlay(b, in child);
-                else if (IsVehicleWheel(b) && child.Shape == ShapeType.Sphere)
-                    DrawVehicleWheelOverlay(b, in child);
-                else if (string.Equals(b.Tag as string, "WoodenCartWheel", StringComparison.Ordinal) && child.Shape == ShapeType.Sphere)
-                    DrawCartWheelOverlay(b, in child);
+
+                bool asBarrel = IsExplosiveBarrel(b) && child.Shape == ShapeType.Box;
+                bool asWheel = child.Shape == ShapeType.Sphere && (IsVehicleWheel(b) || IsCartWheel(b));
+                bool asDumbbell = string.Equals(b.Tag as string, "Dumbbell", StringComparison.Ordinal);
+                if (asBarrel)
+                {
+                    DrawBarrelCylinder(b, in child);
+                }
+                else if (asWheel)
+                {
+                    DrawWheelCylinder(b, in child);
+                }
+                else if (asDumbbell)
+                {
+                    DrawDumbbellPart(b, in child);
+                }
+                else
+                {
+                    GL.UniformMatrix4(_uModel, ToArray(ModelMatrix(b, in child)));
+                    MeshFor(child.Shape).Draw();
+                    if (IsAndroidBody(b))
+                        DrawAndroidOverlay(b, in child);
+                    else if (IsVehicleChassis(b))
+                        DrawVehicleChassisOverlay(b, in child);
+                }
                 if (b.IsStatic) { GL.Uniform1(_uUvScale, 1f); GL.Uniform1(_uWorldUv, 0f); }
             }
         }
@@ -4753,16 +4872,31 @@ internal sealed partial class GlPanel : Control
     {
         GL.DepthFunc(GL.LEQUAL);
         GL.CullFace(GL.FRONT);
-        GL.BindTexture(GL.TEXTURE_2D, _texSky);
-        GL.Uniform1(_uUvScale, 1f);
-        GL.Uniform1(_uAlpha, 1f);
-        GL.Uniform1(_uEmissive, 1f);
-        GL.Uniform3(_uColor, 1f, 1f, 1f);
-        GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(78f) * Matrix4x4.CreateTranslation(_camPos)));
-        _cubeMesh.Draw();
+        var model = Matrix4x4.CreateScale(78f) * Matrix4x4.CreateTranslation(_camPos);
+        if (_skyProgram != 0)
+        {
+            GL.UseProgram(_skyProgram);
+            GL.UniformMatrix4(_uSkyModel, ToArray(model));
+            GL.UniformMatrix4(_uSkyView, ToArray(_view));
+            GL.UniformMatrix4(_uSkyProj, ToArray(_proj));
+            GL.Uniform3(_uSkyCamPos, _camPos.X, _camPos.Y, _camPos.Z);
+            GL.Uniform1(_uSkyTime, (float)_sw.Elapsed.TotalSeconds);
+            _cubeMesh.Draw();
+            GL.UseProgram(_mainProgram);   // restore the main program for the rest of the frame
+        }
+        else
+        {
+            GL.BindTexture(GL.TEXTURE_2D, _texSky);
+            GL.Uniform1(_uUvScale, 1f);
+            GL.Uniform1(_uAlpha, 1f);
+            GL.Uniform1(_uEmissive, 1f);
+            GL.Uniform3(_uColor, 1f, 1f, 1f);
+            GL.UniformMatrix4(_uModel, ToArray(model));
+            _cubeMesh.Draw();
+            GL.Uniform1(_uEmissive, 0f);
+        }
         GL.CullFace(GL.BACK);
         GL.DepthFunc(GL.LESS);
-        GL.Uniform1(_uEmissive, 0f);
     }
 
     private void DrawCartWheelOverlay(RigidBody b, in ChildShape child)
@@ -5169,10 +5303,13 @@ internal sealed partial class GlPanel : Control
         if (_particles.Count == 0) return;
         GL.BindTexture(GL.TEXTURE_2D, _texMetal);
         GL.Uniform1(_uUvScale, 1f);
-        GL.Uniform1(_uEmissive, 1f); // particles glow regardless of lighting
 
+        // Opaque pass: fire / sparks (glowing).
+        GL.Uniform1(_uEmissive, 1f);
+        bool anySmoke = false;
         foreach (var p in _particles)
         {
+            if (p.Smoke) { anySmoke = true; continue; }
             float fade = p.Life / p.MaxLife;
             GL.Uniform3(_uColor, p.Color.X * fade, p.Color.Y * fade, p.Color.Z * fade);
             GL.UniformMatrix4(_uModel, ToArray(
@@ -5180,6 +5317,30 @@ internal sealed partial class GlPanel : Control
             _sphereMesh.Draw();
         }
         GL.Uniform1(_uEmissive, 0f);
+
+        // Translucent pass: smoke. Alpha-blended with depth-write off so overlapping puffs read as
+        // a soft volume instead of a pile of solid grey balls.
+        if (anySmoke)
+        {
+            GL.Enable(GL.BLEND);
+            GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+            GL.DepthMask(0);
+            foreach (var p in _particles)
+            {
+                if (!p.Smoke) continue;
+                float fade = p.Life / p.MaxLife;            // 1 fresh -> 0 gone
+                float grow = 1.0f + (1.0f - fade) * 1.5f;   // expands modestly as it ages
+                float shade = 0.26f + (1.0f - fade) * 0.20f;
+                GL.Uniform1(_uAlpha, fade * 0.40f);          // translucent, fades out completely
+                GL.Uniform3(_uColor, shade, shade, shade);
+                GL.UniformMatrix4(_uModel, ToArray(
+                    Matrix4x4.CreateScale(p.Size * grow) * Matrix4x4.CreateTranslation(p.Pos)));
+                _sphereMesh.Draw();
+            }
+            GL.Uniform1(_uAlpha, 1f);
+            GL.DepthMask(1);
+            GL.Disable(GL.BLEND);
+        }
     }
 
     private void DrawEditorGizmo()
@@ -5485,7 +5646,7 @@ internal sealed partial class GlPanel : Control
         if (string.Equals(b.Tag as string, "CatapultLauncher", StringComparison.Ordinal)) return child.Shape == ShapeType.Sphere ? _texRustyMetal : _texCartWood;
         if (string.Equals(b.Tag as string, "BowlingPin", StringComparison.Ordinal)) return _texBowlingPin;
         if (string.Equals(b.Tag as string, "Hammer", StringComparison.Ordinal))
-            return child.Shape == ShapeType.Box ? _texMetal : _texCartWood;
+            return child.HalfExtents.Z > 0.15f ? _texMetal : _texCartWood;   // metal head, wood handle
         if (string.Equals(b.Tag as string, "Dumbbell", StringComparison.Ordinal)) return _texRustyMetal;
         if (string.Equals(b.Tag as string, "WreckingBallTarget", StringComparison.Ordinal)) return _texRustyMetal;
         if (string.Equals(b.Tag as string, "WreckingBallAnchor", StringComparison.Ordinal)) return _texRustyMetal;
@@ -5650,22 +5811,70 @@ internal sealed partial class GlPanel : Control
         GL.Uniform3(_uColor, 0.12f, 0.16f, 0.20f);
         if (he.Y > 0.16f)
         {
-            var glass = Matrix4x4.CreateScale(he.X * 0.75f, he.Y * 0.32f, he.Z * 0.10f)
-                      * Matrix4x4.CreateFromAxisAngle(Vector3.UnitX, -0.32f)
-                      * Matrix4x4.CreateTranslation(-he.X * 0.08f, he.Y * 0.08f, he.Z * 1.03f)
-                      * localToWorld;
-            GL.UniformMatrix4(_uModel, ToArray(glass));
-            _cubeMesh.Draw();
+            // Glass greenhouse, oriented to the real front (+X): slanted windshield, rear window, side glass.
+            void Glass(Matrix4x4 m) { GL.UniformMatrix4(_uModel, ToArray(m * localToWorld)); _cubeMesh.Draw(); }
+            // front windshield: thin slab at the front, top leaning back
+            Glass(Matrix4x4.CreateScale(he.X * 0.10f, he.Y * 0.55f, he.Z * 0.84f)
+                * Matrix4x4.CreateFromAxisAngle(Vector3.UnitZ, 0.55f)
+                * Matrix4x4.CreateTranslation(he.X * 0.70f, he.Y * 0.28f, 0f));
+            // rear window: opposite slant
+            Glass(Matrix4x4.CreateScale(he.X * 0.10f, he.Y * 0.50f, he.Z * 0.82f)
+                * Matrix4x4.CreateFromAxisAngle(Vector3.UnitZ, -0.50f)
+                * Matrix4x4.CreateTranslation(-he.X * 0.74f, he.Y * 0.28f, 0f));
+            // side windows
+            foreach (float sz in new[] { -he.Z * 1.01f, he.Z * 1.01f })
+                Glass(Matrix4x4.CreateScale(he.X * 0.62f, he.Y * 0.40f, he.Z * 0.05f)
+                    * Matrix4x4.CreateTranslation(0f, he.Y * 0.26f, sz));
+
+            // variant roof details
+            string? vtag = b.Tag as string;
+            if (string.Equals(vtag, "PoliceVehicleChassis", StringComparison.Ordinal))
+            {
+                foreach (var (sx, cr, cg, cb) in new[] { (-he.X * 0.16f, 0.95f, 0.10f, 0.10f), (he.X * 0.16f, 0.10f, 0.30f, 0.98f) })
+                {
+                    GL.Uniform1(_uEmissive, 0.95f);
+                    GL.Uniform3(_uColor, cr, cg, cb);
+                    var bar = Matrix4x4.CreateScale(he.X * 0.14f, he.Y * 0.16f, he.Z * 0.55f)
+                            * Matrix4x4.CreateTranslation(sx, he.Y * 1.08f, 0f)
+                            * localToWorld;
+                    GL.UniformMatrix4(_uModel, ToArray(bar));
+                    _cubeMesh.Draw();
+                }
+                GL.Uniform1(_uEmissive, 0f);
+            }
+            else if (string.Equals(vtag, "AmbulanceChassis", StringComparison.Ordinal))
+            {
+                GL.Uniform1(_uEmissive, 0.30f);
+                GL.Uniform3(_uColor, 0.90f, 0.12f, 0.12f);
+                var v1 = Matrix4x4.CreateScale(he.X * 0.10f, he.Y * 0.06f, he.Z * 0.46f)
+                       * Matrix4x4.CreateTranslation(0f, he.Y * 1.04f, 0f) * localToWorld;
+                GL.UniformMatrix4(_uModel, ToArray(v1)); _cubeMesh.Draw();
+                var v2 = Matrix4x4.CreateScale(he.X * 0.30f, he.Y * 0.06f, he.Z * 0.15f)
+                       * Matrix4x4.CreateTranslation(0f, he.Y * 1.04f, 0f) * localToWorld;
+                GL.UniformMatrix4(_uModel, ToArray(v2)); _cubeMesh.Draw();
+                GL.Uniform1(_uEmissive, 0f);
+            }
         }
         else
         {
-            // main body gets front lights
-            GL.Uniform1(_uEmissive, 0.65f);
+            // headlights at the front (+X), spread across the width (Z)
+            GL.Uniform1(_uEmissive, 0.70f);
             GL.Uniform3(_uColor, 1.00f, 0.95f, 0.72f);
-            foreach (float sx in new[] { -he.X * 0.60f, he.X * 0.60f })
+            foreach (float sz in new[] { -he.Z * 0.62f, he.Z * 0.62f })
             {
-                var light = Matrix4x4.CreateScale(he.Z * 0.18f)
-                          * Matrix4x4.CreateTranslation(sx, 0f, he.Z * 1.10f)
+                var light = Matrix4x4.CreateScale(he.Y * 0.5f)
+                          * Matrix4x4.CreateTranslation(he.X * 1.02f, -he.Y * 0.10f, sz)
+                          * localToWorld;
+                GL.UniformMatrix4(_uModel, ToArray(light));
+                _sphereMesh.Draw();
+            }
+            // taillights at the back (-X), red
+            GL.Uniform1(_uEmissive, 0.55f);
+            GL.Uniform3(_uColor, 0.95f, 0.12f, 0.10f);
+            foreach (float sz in new[] { -he.Z * 0.62f, he.Z * 0.62f })
+            {
+                var light = Matrix4x4.CreateScale(he.Y * 0.4f)
+                          * Matrix4x4.CreateTranslation(-he.X * 1.02f, -he.Y * 0.10f, sz)
                           * localToWorld;
                 GL.UniformMatrix4(_uModel, ToArray(light));
                 _sphereMesh.Draw();
@@ -5927,6 +6136,67 @@ internal sealed partial class GlPanel : Control
         GL.Disable(GL.BLEND);
         GL.Uniform1(_uAlpha, 1f);
         GL.Uniform1(_uEmissive, 0f);
+    }
+
+    private static bool IsCartWheel(RigidBody b)
+        => string.Equals(b.Tag as string, "WoodenCartWheel", StringComparison.Ordinal);
+
+    // Wheels are spheres on point joints, so friction/impacts can spin them about any axis.
+    // Lock each wheel's spin to its axle (world Z for an axis-aligned vehicle/cart) so they roll
+    // like real wheels instead of tumbling. (Assumes the rig is spawned axis-aligned, which it is.)
+    private void LockWheelAxes()
+    {
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic) continue;
+            if (!IsVehicleWheel(b) && !IsCartWheel(b)) continue;
+            float spin = b.AngularVelocity.Z;   // project onto the Z axle
+            b.AngularVelocity = new Vector3(0f, 0f, spin);
+        }
+    }
+
+    /// <summary>Draw an explosive barrel as a proper upright cylinder (its physics body is a capsule).</summary>
+    private void DrawBarrelCylinder(RigidBody b, in ChildShape child)
+    {
+        float r = MathF.Max(child.HalfExtents.X, child.HalfExtents.Z);
+        float halfH = child.HalfExtents.Y;
+        var m = Matrix4x4.CreateScale(r, halfH, r)
+              * Matrix4x4.CreateFromQuaternion(child.LocalRot)
+              * Matrix4x4.CreateTranslation(child.LocalPos)
+              * Matrix4x4.CreateFromQuaternion(b.Rotation)
+              * Matrix4x4.CreateTranslation(b.Position);
+        GL.UniformMatrix4(_uModel, ToArray(m));
+        _cylinderMesh.Draw();
+    }
+
+    /// <summary>Draw a wheel as a cylinder/disc (physics body is a sphere). The axle is world Z
+    /// for an axis-aligned vehicle/cart; the body's own rotation carries the rolling spin.</summary>
+    private void DrawWheelCylinder(RigidBody b, in ChildShape child)
+    {
+        float r = child.Radius;
+        float halfWidth = r * 0.55f;
+        var m = Matrix4x4.CreateScale(r, halfWidth, r)
+              * Matrix4x4.CreateRotationX(MathF.PI * 0.5f)              // axis Y -> Z (axle)
+              * Matrix4x4.CreateFromQuaternion(b.Rotation)
+              * Matrix4x4.CreateTranslation(b.Position + Vector3.Transform(child.LocalPos, b.Rotation));
+        GL.UniformMatrix4(_uModel, ToArray(m));
+        _cylinderMesh.Draw();
+    }
+
+    /// <summary>Render a dumbbell as a thin cylinder handle plus two thick weight discs (its
+    /// physics is a box handle + two spheres). Cylinder axis is laid along the body X axis.</summary>
+    private void DrawDumbbellPart(RigidBody b, in ChildShape child)
+    {
+        bool handle = child.Shape == ShapeType.Box;
+        float radius = handle ? child.HalfExtents.Y : child.Radius;
+        float halfLen = handle ? child.HalfExtents.X : child.Radius * 0.5f;
+        var m = Matrix4x4.CreateScale(radius, halfLen, radius)
+              * Matrix4x4.CreateRotationZ(MathF.PI * 0.5f)              // axis Y -> X (handle direction)
+              * Matrix4x4.CreateTranslation(child.LocalPos)
+              * Matrix4x4.CreateFromQuaternion(b.Rotation)
+              * Matrix4x4.CreateTranslation(b.Position);
+        GL.UniformMatrix4(_uModel, ToArray(m));
+        _cylinderMesh.Draw();
     }
 
     private Mesh MeshFor(ShapeType shape) => shape switch

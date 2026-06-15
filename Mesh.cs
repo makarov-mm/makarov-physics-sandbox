@@ -110,6 +110,64 @@ internal sealed class Mesh
         return new Mesh(verts.ToArray(), idx.ToArray());
     }
 
+    /// <summary>Unit cylinder: radius 1, half-height 1, axis = Y (scale per draw). Used for
+    /// barrels, wheels and prop handles so they read as real cylinders, not capsules/spheres.</summary>
+    public static Mesh CreateCylinder(int sectors = 32)
+    {
+        var verts = new List<float>();
+        var idx = new List<uint>();
+
+        void V(float px, float py, float pz, float nx, float ny, float nz, float u, float v)
+        {
+            verts.Add(px); verts.Add(py); verts.Add(pz);
+            verts.Add(nx); verts.Add(ny); verts.Add(nz);
+            verts.Add(u); verts.Add(v);
+        }
+
+        // side wall: per sector a bottom (y=-1) and top (y=+1) vertex, radial normals
+        uint side = (uint)(verts.Count / 8);
+        for (int j = 0; j <= sectors; j++)
+        {
+            float th = 2f * MathF.PI * j / sectors;
+            float x = MathF.Cos(th), z = MathF.Sin(th);
+            float u = (float)j / sectors;
+            V(x, -1, z, x, 0, z, u, 0f); // bottom
+            V(x,  1, z, x, 0, z, u, 1f); // top
+        }
+        for (int j = 0; j < sectors; j++)
+        {
+            uint b0 = side + (uint)(j * 2), t0 = b0 + 1, b1 = b0 + 2, t1 = b0 + 3;
+            idx.Add(b0); idx.Add(t0); idx.Add(t1); // CCW from outside
+            idx.Add(b0); idx.Add(t1); idx.Add(b1);
+        }
+
+        // top cap (+Y)
+        uint topC = (uint)(verts.Count / 8);
+        V(0, 1, 0, 0, 1, 0, 0.5f, 0.5f);
+        uint topR = (uint)(verts.Count / 8);
+        for (int j = 0; j <= sectors; j++)
+        {
+            float th = 2f * MathF.PI * j / sectors;
+            float x = MathF.Cos(th), z = MathF.Sin(th);
+            V(x, 1, z, 0, 1, 0, 0.5f + 0.5f * x, 0.5f + 0.5f * z);
+        }
+        for (int j = 0; j < sectors; j++) { idx.Add(topC); idx.Add(topR + (uint)j + 1); idx.Add(topR + (uint)j); }
+
+        // bottom cap (-Y)
+        uint botC = (uint)(verts.Count / 8);
+        V(0, -1, 0, 0, -1, 0, 0.5f, 0.5f);
+        uint botR = (uint)(verts.Count / 8);
+        for (int j = 0; j <= sectors; j++)
+        {
+            float th = 2f * MathF.PI * j / sectors;
+            float x = MathF.Cos(th), z = MathF.Sin(th);
+            V(x, -1, z, 0, -1, 0, 0.5f + 0.5f * x, 0.5f + 0.5f * z);
+        }
+        for (int j = 0; j < sectors; j++) { idx.Add(botC); idx.Add(botR + (uint)j); idx.Add(botR + (uint)j + 1); }
+
+        return new Mesh(verts.ToArray(), idx.ToArray());
+    }
+
     /// <summary>Unit quad at y = 0, normal up; scale it at draw time.</summary>
     /// <summary>
     /// Capsule: radius 0.5, cylindrical half-height 0.8 (axis = Y).

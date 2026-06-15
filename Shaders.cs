@@ -198,6 +198,75 @@ internal static class Shaders
         void main() { }
         """;
 
+    // A real direction-based sky: colour is computed per pixel from the view ray, so there is
+    // exactly one sun, a smooth horizon->zenith gradient and drifting clouds, with no cube seams
+    // or repeated suns (unlike a 2D texture wrapped on a cube). Runs as its own program; if it
+    // fails to compile/link the engine falls back to the textured skybox cube.
+    public const string SkyVertex = """
+        #version 410 core
+        layout(location = 0) in vec3 aPos;
+        layout(location = 1) in vec3 aNormal;
+        layout(location = 2) in vec2 aUV;
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProj;
+        out vec3 vWorldPos;
+        void main()
+        {
+            vec4 world = uModel * vec4(aPos, 1.0);
+            vWorldPos = world.xyz;
+            gl_Position = uProj * uView * world;
+        }
+        """;
+
+    public const string SkyFragment = """
+        #version 410 core
+        in vec3 vWorldPos;
+        out vec4 FragColor;
+        uniform vec3 uCamPos;
+        uniform float uTime;
+
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p)
+        {
+            vec2 i = floor(p), f = fract(p);
+            float a = hash(i), b = hash(i + vec2(1, 0)), c = hash(i + vec2(0, 1)), d = hash(i + vec2(1, 1));
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+        }
+        float fbm(vec2 p)
+        {
+            float v = 0.0, a = 0.5;
+            for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.0; a *= 0.5; }
+            return v;
+        }
+
+        void main()
+        {
+            vec3 d = normalize(vWorldPos - uCamPos);
+            float alt = clamp(d.y, 0.0, 1.0);
+
+            vec3 horizon = vec3(0.74, 0.85, 0.96);
+            vec3 zenith  = vec3(0.18, 0.42, 0.82);
+            vec3 sky = mix(horizon, zenith, pow(alt, 0.55));
+
+            vec3 sunDir = normalize(vec3(0.35, 0.55, 0.30));
+            float s = max(dot(d, sunDir), 0.0);
+            sky += vec3(1.0, 0.96, 0.82) * pow(s, 1500.0) * 1.6;   // tight sun disc
+            sky += vec3(1.0, 0.90, 0.72) * pow(s, 8.0) * 0.20;     // warm glow
+
+            if (d.y > 0.05)
+            {
+                vec2 uv = d.xz / d.y * 0.6 + vec2(uTime * 0.006, 0.0);
+                float c = fbm(uv);
+                c = smoothstep(0.55, 0.95, c) * clamp((d.y - 0.05) * 3.0, 0.0, 1.0);
+                sky = mix(sky, vec3(1.0), c * 0.85);
+            }
+
+            FragColor = vec4(sky, 1.0);
+        }
+        """;
+
     public static uint Build(string vertexSrc, string fragmentSrc)
     {
         uint vs = Compile(GL.VERTEX_SHADER, vertexSrc, "vertex");

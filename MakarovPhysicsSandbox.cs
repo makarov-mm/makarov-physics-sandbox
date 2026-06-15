@@ -784,6 +784,7 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Chain",        "chain.png",    "L",        () => _gl.SpawnChain(), placeOnScene: true);
             AddToolbarButton(ts, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), placeOnScene: true);
             AddToolbarButton(ts, "Drone target",   "drone.png",   "",  () => _gl.SpawnDroneTarget(), placeOnScene: true);
+            AddToolbarButton(ts, "Sentinel bot", "sentinel.png", "", () => _gl.SpawnSentinelBot(), placeOnScene: true);
             AddToolbarButton(ts, "Vehicle",       "vehicle.png", "N", () => _gl.SpawnVehicle(), placeOnScene: true);
             AddToolbarButton(ts, "Police car", "police.png", "", () => _gl.SpawnPoliceVehicle(), placeOnScene: true);
             AddToolbarButton(ts, "Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance(), placeOnScene: true);
@@ -797,7 +798,6 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall(), placeOnScene: true);
             AddToolbarButton(ts, "Metal cube", "metalcube.png", "", () => _gl.SpawnMetalCube(), placeOnScene: true);
             AddToolbarButton(ts, "Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder(), placeOnScene: true);
-            AddToolbarButton(ts, "Sentinel bot", "sentinel.png", "", () => _gl.SpawnSentinelBot(), placeOnScene: true);
             AddToolbarButton(ts, "Motor hinge",   "motor.png",   "",  () => _gl.SpawnMotor(), placeOnScene: true);
             AddToolbarButton(ts, "Gate",          "gate.png",    "",  () => _gl.SpawnGate(), placeOnScene: true);
             AddToolbarButton(ts, "Timer",         "timer.png",   "",  () => _gl.SpawnTimer(), placeOnScene: true);
@@ -950,11 +950,11 @@ namespace MakarovPhysicsSandbox
             var dummies = CatalogCategory("Dummies & vehicles");
             AddCatalogAction(dummies.DropDownItems, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), "Synthetic crash-test dummy");
             AddCatalogAction(dummies.DropDownItems, "Drone target", "drone.png", "", () => _gl.SpawnDroneTarget(), "Small synthetic aerial target");
+            AddCatalogAction(dummies.DropDownItems, "Sentinel bot", "sentinel.png", "", () => _gl.SpawnSentinelBot(), "Small synthetic rolling ground target");
             AddCatalogAction(dummies.DropDownItems, "Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle(), "Simple crash-test vehicle rig");
             AddCatalogAction(dummies.DropDownItems, "Police car", "police.png", "", () => _gl.SpawnPoliceVehicle(), "Vehicle variant for crashes and bridge scenes");
             AddCatalogAction(dummies.DropDownItems, "Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance(), "Larger emergency vehicle variant");
             AddCatalogAction(dummies.DropDownItems, "Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget(), "Heavy suspended impact target");
-            AddCatalogAction(dummies.DropDownItems, "Sentinel bot", "sentinel.png", "", () => _gl.SpawnSentinelBot(), "Small synthetic rolling target");
 
             var structures = CatalogCategory("Structures & launchers");
             AddCatalogAction(structures.DropDownItems, "Bridge span", "bridge.png", "", () => _gl.SpawnBridgeSpan(), "Jointed wooden bridge module");
@@ -1476,6 +1476,14 @@ namespace MakarovPhysicsSandbox
 
         private void OnIdle(object? sender, EventArgs e)
         {
+            // While a menu/result overlay is up, stop the busy GL render loop: it otherwise pegs the
+            // message pump and the GL surface overdraws the overlay, so button clicks were getting
+            // eaten (the "first click does nothing" issue). Let the UI own input; resume after.
+            if (_startOverlay?.Visible == true || _resultOverlay?.Visible == true)
+            {
+                _gl.RenderFrame();   // one frame so the dimmed scene stays drawn behind the panel
+                return;
+            }
             while (AppStillIdle)
                 _gl.RenderFrame();
         }

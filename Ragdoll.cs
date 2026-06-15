@@ -377,8 +377,8 @@ internal sealed class RagdollSystem
             lateralError = Vector3.Normalize(lateralError) * maxError;
 
         // Pull the pelvis back over the lower legs and damp excessive spin. Hard hits still overpower this.
-        pelvis.Velocity += lateralError * Math.Clamp(9.0f * dt, 0f, 0.36f);
-        pelvis.AngularVelocity *= MathF.Pow(0.38f, dt);
+        pelvis.Velocity += lateralError * Math.Clamp(13.0f * dt, 0f, 0.5f);
+        pelvis.AngularVelocity *= MathF.Pow(0.30f, dt);
         pelvis.Wake();
     }
 
