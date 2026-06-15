@@ -19,7 +19,7 @@ internal sealed partial class GlPanel
 
         foreach (var b in _world.Bodies)
         {
-            if (b.IsStatic && !b.UserObject) continue; // arena walls are rebuilt on load
+            if (b is { IsStatic: true, UserObject: false }) continue; // arena walls are rebuilt on load
             bodyIndex[b] = bodies.Count;
             bodies.Add(SceneBodyDto.FromBody(b));
         }
@@ -40,8 +40,8 @@ internal sealed partial class GlPanel
                 Type = j.Type.ToString(),
                 A = a,
                 B = b,
-                LocalA = V3.From(j.LocalA),
-                LocalB = V3.From(j.LocalB),
+                LocalA = j.LocalA,
+                LocalB = j.LocalB,
                 Length = j.Length,
                 Stiffness = j.Stiffness,
                 Damping = j.Damping,
@@ -54,7 +54,7 @@ internal sealed partial class GlPanel
             SavedAtUtc = DateTime.UtcNow,
             ZeroGravity = _zeroG,
             WaterOn = _waterOn,
-            Gravity = V3.From(_world.Gravity),
+            Gravity = _world.Gravity,
             Bodies = bodies,
             Joints = joints,
             Fields = _world.Fields.Select(SceneForceFieldDto.FromField).ToList(),
@@ -113,8 +113,8 @@ internal sealed partial class GlPanel
                 Type = type,
                 A = loadedBodies[jointDto.A],
                 B = b,
-                LocalA = jointDto.LocalA.ToVector3(),
-                LocalB = jointDto.LocalB.ToVector3(),
+                LocalA = jointDto.LocalA,
+                LocalB = jointDto.LocalB,
                 Length = jointDto.Length,
                 Stiffness = jointDto.Stiffness <= 0 ? 18f : jointDto.Stiffness,
                 Damping = jointDto.Damping <= 0 ? 2.2f : jointDto.Damping,
@@ -127,10 +127,10 @@ internal sealed partial class GlPanel
             _world.Fields.Add(new ForceField
             {
                 Type = type,
-                Position = fieldDto.Position.ToVector3(),
+                Position = fieldDto.Position,
                 Radius = fieldDto.Radius,
                 Strength = fieldDto.Strength,
-                WindDir = fieldDto.WindDir.ToVector3(),
+                WindDir = fieldDto.WindDir,
             });
         }
 
@@ -138,7 +138,7 @@ internal sealed partial class GlPanel
         {
             _world.Waters.Add(new WaterVolume
             {
-                Center = waterDto.Center.ToVector3(),
+                Center = waterDto.Center,
                 HalfX = waterDto.HalfX,
                 HalfZ = waterDto.HalfZ,
                 SurfaceY = waterDto.SurfaceY,
@@ -158,15 +158,15 @@ internal sealed partial class GlPanel
                 Name = string.IsNullOrWhiteSpace(triggerDto.DisplayName)
                     ? string.IsNullOrWhiteSpace(triggerDto.Name) ? "Trigger" : triggerDto.Name
                     : triggerDto.DisplayName,
-                Position = triggerDto.Position.ToVector3(),
-                HalfExtents = triggerDto.HalfExtents.ToVector3(),
+                Position = triggerDto.Position,
+                HalfExtents = triggerDto.HalfExtents,
                 Action = action,
                 OneShot = triggerDto.OneShot,
                 Enabled = triggerDto.Enabled,
                 Radius = triggerDto.Radius <= 0 ? 5.0f : triggerDto.Radius,
                 Strength = triggerDto.Strength <= 0 ? 10.0f : triggerDto.Strength,
                 CooldownSeconds = triggerDto.CooldownSeconds <= 0 ? 1.0f : triggerDto.CooldownSeconds,
-                TargetOffset = triggerDto.TargetOffset?.ToVector3() ?? Vector3.Zero,
+                TargetOffset = triggerDto.TargetOffset ?? Vector3.Zero,
             };
             foreach (var outputDto in triggerDto.Outputs ?? [])
                 trigger.Outputs.Add(outputDto.ToOutput());
@@ -177,7 +177,7 @@ internal sealed partial class GlPanel
 
         _zeroG = dto.ZeroGravity;
         _waterOn = dto.WaterOn || _world.Waters.Count > 0;
-        _world.Gravity = _zeroG ? Vector3.Zero : dto.Gravity.ToVector3();
+        _world.Gravity = _zeroG ? Vector3.Zero : dto.Gravity;
         if (_world.Gravity.LengthSquared() < 1e-6f && !_zeroG) _world.Gravity = DefaultGravity;
 
         foreach (var b in _world.Bodies) b.Wake();
@@ -192,7 +192,7 @@ internal sealed class SceneDto
     public DateTime SavedAtUtc { get; set; }
     public bool ZeroGravity { get; set; }
     public bool WaterOn { get; set; }
-    public V3 Gravity { get; set; } = V3.From(new Vector3(0, -9.81f, 0));
+    public Vector3 Gravity { get; set; } = new(0, -9.81f, 0);
     public List<SceneBodyDto>? Bodies { get; set; }
     public List<SceneJointDto>? Joints { get; set; }
     public List<SceneForceFieldDto>? Fields { get; set; }
@@ -203,16 +203,16 @@ internal sealed class SceneDto
 
 internal sealed class SceneBodyDto
 {
-    public V3 Position { get; set; } = new();
-    public Q4 Rotation { get; set; } = Q4.From(Quaternion.Identity);
-    public V3 Velocity { get; set; } = new();
-    public V3 AngularVelocity { get; set; } = new();
+    public Vector3 Position { get; set; }
+    public Quaternion Rotation { get; set; } = Quaternion.Identity;
+    public Vector3 Velocity { get; set; }
+    public Vector3 AngularVelocity { get; set; }
     public float Density { get; set; } = 1f;
     public string MaterialId { get; set; } = "Custom";
     public float Restitution { get; set; }
     public float Friction { get; set; }
     public bool IsStatic { get; set; }
-    public V3 Color { get; set; } = V3.From(new Vector3(0.8f));
+    public Vector3 Color { get; set; } = new(0.8f);
     public bool Sleeping { get; set; }
     public bool Breakable { get; set; }
     public float BreakThreshold { get; set; } = 7.5f;
@@ -226,16 +226,16 @@ internal sealed class SceneBodyDto
 
     public static SceneBodyDto FromBody(RigidBody b) => new()
     {
-        Position = V3.From(b.Position),
-        Rotation = Q4.From(b.Rotation),
-        Velocity = V3.From(b.Velocity),
-        AngularVelocity = V3.From(b.AngularVelocity),
+        Position = b.Position,
+        Rotation = b.Rotation,
+        Velocity = b.Velocity,
+        AngularVelocity = b.AngularVelocity,
         Density = b.Density,
         MaterialId = b.MaterialId.ToString(),
         Restitution = b.Restitution,
         Friction = b.Friction,
         IsStatic = b.IsStatic,
-        Color = V3.From(b.Color),
+        Color = b.Color,
         Sleeping = b.Sleeping,
         Breakable = b.Breakable,
         BreakThreshold = b.BreakThreshold,
@@ -254,11 +254,11 @@ internal sealed class SceneBodyDto
         if (children.Length == 0) children = [ChildShape.Box(new Vector3(0.5f))];
 
         var b = RigidBody.CreateCompound(Vector3.Zero, children, MathF.Max(Density, 0.001f));
-        b.Position = Position.ToVector3();
-        var q = Rotation.ToQuaternion();
+        b.Position = Position;
+        Quaternion q = Rotation;
         b.Rotation = Quaternion.Normalize(q == default ? Quaternion.Identity : q);
-        b.Velocity = Velocity.ToVector3();
-        b.AngularVelocity = AngularVelocity.ToVector3();
+        b.Velocity = Velocity;
+        b.AngularVelocity = AngularVelocity;
         b.Density = MathF.Max(Density, 0.001f);
         b.MaterialId = Materials.TryParse(MaterialId, out var materialId) ? materialId : Materials.GuessFromValues(b);
         b.Restitution = Restitution;
@@ -273,7 +273,7 @@ internal sealed class SceneBodyDto
         b.ExplosivePower = ExplosivePower;
         b.Wetness = Wetness;
         b.Temperature = Temperature <= 0 ? 20f : Temperature;
-        b.Color = Color.ToVector3();
+        b.Color = Color;
         b.Sleeping = Sleeping;
         b.UpdateDerived();
         return b;
@@ -283,34 +283,34 @@ internal sealed class SceneBodyDto
 internal sealed class SceneChildShapeDto
 {
     public string Shape { get; set; } = nameof(ShapeType.Box);
-    public V3 LocalPos { get; set; } = new();
-    public Q4 LocalRot { get; set; } = Q4.From(Quaternion.Identity);
+    public Vector3 LocalPos { get; set; }
+    public Quaternion LocalRot { get; set; } = Quaternion.Identity;
     public float Radius { get; set; }
-    public V3 HalfExtents { get; set; } = new();
+    public Vector3 HalfExtents { get; set; }
     public float HalfHeight { get; set; }
 
     public static SceneChildShapeDto FromChild(ChildShape c) => new()
     {
         Shape = c.Shape.ToString(),
-        LocalPos = V3.From(c.LocalPos),
-        LocalRot = Q4.From(c.LocalRot),
+        LocalPos = c.LocalPos,
+        LocalRot = c.LocalRot,
         Radius = c.Radius,
-        HalfExtents = V3.From(c.HalfExtents),
+        HalfExtents = c.HalfExtents,
         HalfHeight = c.HalfHeight,
     };
 
     public ChildShape ToChild()
     {
         if (!Enum.TryParse<ShapeType>(Shape, out var shape)) shape = ShapeType.Box;
-        var q = LocalRot.ToQuaternion();
+        Quaternion q = LocalRot;
         if (q == default) q = Quaternion.Identity;
         return new ChildShape
         {
             Shape = shape,
-            LocalPos = LocalPos.ToVector3(),
+            LocalPos = LocalPos,
             LocalRot = Quaternion.Normalize(q),
             Radius = Radius,
-            HalfExtents = HalfExtents.ToVector3(),
+            HalfExtents = HalfExtents,
             HalfHeight = HalfHeight,
         };
     }
@@ -321,8 +321,8 @@ internal sealed class SceneJointDto
     public string Type { get; set; } = nameof(Joint.Kind.Distance);
     public int A { get; set; }
     public int? B { get; set; }
-    public V3 LocalA { get; set; } = new();
-    public V3 LocalB { get; set; } = new();
+    public Vector3 LocalA { get; set; } = new();
+    public Vector3 LocalB { get; set; } = new();
     public float Length { get; set; }
     public float Stiffness { get; set; }
     public float Damping { get; set; }
@@ -331,24 +331,24 @@ internal sealed class SceneJointDto
 internal sealed class SceneForceFieldDto
 {
     public string Type { get; set; } = nameof(ForceField.Kind.Attract);
-    public V3 Position { get; set; } = new();
+    public Vector3 Position { get; set; } = new();
     public float Radius { get; set; }
     public float Strength { get; set; }
-    public V3 WindDir { get; set; } = V3.From(Vector3.UnitX);
+    public Vector3 WindDir { get; set; } = Vector3.UnitX;
 
     public static SceneForceFieldDto FromField(ForceField f) => new()
     {
         Type = f.Type.ToString(),
-        Position = V3.From(f.Position),
+        Position = f.Position,
         Radius = f.Radius,
         Strength = f.Strength,
-        WindDir = V3.From(f.WindDir),
+        WindDir = f.WindDir,
     };
 }
 
 internal sealed class SceneWaterDto
 {
-    public V3 Center { get; set; } = new();
+    public Vector3 Center { get; set; }
     public float HalfX { get; set; }
     public float HalfZ { get; set; }
     public float SurfaceY { get; set; }
@@ -359,7 +359,7 @@ internal sealed class SceneWaterDto
 
     public static SceneWaterDto FromWater(WaterVolume w) => new()
     {
-        Center = V3.From(w.Center),
+        Center = w.Center,
         HalfX = w.HalfX,
         HalfZ = w.HalfZ,
         SurfaceY = w.SurfaceY,
@@ -376,15 +376,15 @@ internal sealed class SceneTriggerDto
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Trigger";
     public string DisplayName { get; set; } = "";
-    public V3 Position { get; set; } = new();
-    public V3 HalfExtents { get; set; } = V3.From(new Vector3(0.9f, 0.08f, 0.9f));
+    public Vector3 Position { get; set; }
+    public Vector3 HalfExtents { get; set; } = new(0.9f, 0.08f, 0.9f);
     public string Action { get; set; } = nameof(TriggerActionKind.Explosion);
     public bool OneShot { get; set; }
     public bool Enabled { get; set; } = true;
     public float Radius { get; set; } = 5.0f;
     public float Strength { get; set; } = 10.0f;
     public float CooldownSeconds { get; set; } = 1.0f;
-    public V3? TargetOffset { get; set; }
+    public Vector3? TargetOffset { get; set; }
     public List<TriggerOutputDto>? Outputs { get; set; }
 
     public static SceneTriggerDto FromTrigger(SceneTrigger trigger) => new()
@@ -392,15 +392,15 @@ internal sealed class SceneTriggerDto
         Id = trigger.Id,
         Name = trigger.Name,
         DisplayName = trigger.DisplayName,
-        Position = V3.From(trigger.Position),
-        HalfExtents = V3.From(trigger.HalfExtents),
+        Position = trigger.Position,
+        HalfExtents = trigger.HalfExtents,
         Action = trigger.Action.ToString(),
         OneShot = trigger.OneShot,
         Enabled = trigger.Enabled,
         Radius = trigger.Radius,
         Strength = trigger.Strength,
         CooldownSeconds = trigger.CooldownSeconds,
-        TargetOffset = V3.From(trigger.TargetOffset),
+        TargetOffset = trigger.TargetOffset,
         Outputs = trigger.Outputs.Select(TriggerOutputDto.FromOutput).ToList(),
     };
 }
@@ -440,25 +440,4 @@ internal sealed class TriggerOutputDto
             Enabled = Enabled,
         };
     }
-}
-
-internal sealed class V3
-{
-    public float X { get; set; }
-    public float Y { get; set; }
-    public float Z { get; set; }
-
-    public static V3 From(Vector3 v) => new() { X = v.X, Y = v.Y, Z = v.Z };
-    public Vector3 ToVector3() => new(X, Y, Z);
-}
-
-internal sealed class Q4
-{
-    public float X { get; set; }
-    public float Y { get; set; }
-    public float Z { get; set; }
-    public float W { get; set; } = 1f;
-
-    public static Q4 From(Quaternion q) => new() { X = q.X, Y = q.Y, Z = q.Z, W = q.W };
-    public Quaternion ToQuaternion() => new(X, Y, Z, W);
 }

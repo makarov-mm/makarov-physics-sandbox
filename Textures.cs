@@ -1,6 +1,4 @@
-using System.Drawing;
-
-﻿namespace MakarovPhysicsSandbox;
+namespace MakarovPhysicsSandbox;
 
 /// <summary>
 /// Texture helpers. The project now prefers authored raster textures from the

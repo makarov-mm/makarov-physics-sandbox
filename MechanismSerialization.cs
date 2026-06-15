@@ -16,18 +16,18 @@ internal sealed partial class GlPanel
                 Name = m.Name,
                 DisplayName = m.DisplayName,
                 Kind = m.Kind.ToString(),
-                Position = V3.From(m.Position),
+                Position = m.Position,
                 Enabled = m.Enabled,
                 Active = m.Active,
                 Radius = m.Radius,
                 Strength = m.Strength,
-                ClosedPosition = V3.From(m.ClosedPosition),
-                OpenPosition = V3.From(m.OpenPosition),
+                ClosedPosition = m.ClosedPosition,
+                OpenPosition = m.OpenPosition,
                 OpenAmount = m.OpenAmount,
                 OpenSpeed = m.OpenSpeed,
                 MotorSpeed = m.MotorSpeed,
                 MotorTorque = m.MotorTorque,
-                MotorAxis = V3.From(m.MotorAxis),
+                MotorAxis = m.MotorAxis,
                 Delay = m.Delay,
                 Remaining = m.Remaining,
                 TimerRunning = m.TimerRunning,
@@ -45,7 +45,7 @@ internal sealed partial class GlPanel
         {
             if (!Enum.TryParse<MechanismKind>(dto.Kind, out var kind)) continue;
             if (!Enum.TryParse<TimerMechanismAction>(dto.TimerAction, out var timerAction)) timerAction = TimerMechanismAction.Chain;
-            var pos = dto.Position.ToVector3();
+            var pos = dto.Position;
             var m = new SceneMechanism
             {
                 Id = string.IsNullOrWhiteSpace(dto.Id) ? SceneId.New("mechanism") : dto.Id,
@@ -58,13 +58,13 @@ internal sealed partial class GlPanel
                 Active = dto.Active,
                 Radius = dto.Radius <= 0 ? 6.0f : dto.Radius,
                 Strength = dto.Strength <= 0 ? 1.0f : dto.Strength,
-                ClosedPosition = dto.ClosedPosition.ToVector3(),
-                OpenPosition = dto.OpenPosition.ToVector3(),
+                ClosedPosition = dto.ClosedPosition,
+                OpenPosition = dto.OpenPosition,
                 OpenAmount = dto.OpenAmount,
                 OpenSpeed = dto.OpenSpeed <= 0 ? 1.6f : dto.OpenSpeed,
                 MotorSpeed = dto.MotorSpeed <= 0 ? 5.0f : dto.MotorSpeed,
                 MotorTorque = dto.MotorTorque <= 0 ? 1.0f : dto.MotorTorque,
-                MotorAxis = dto.MotorAxis != null && dto.MotorAxis.ToVector3().LengthSquared() > 1e-6f ? Vector3.Normalize(dto.MotorAxis.ToVector3()) : Vector3.UnitX,
+                MotorAxis = dto.MotorAxis != null && dto.MotorAxis.LengthSquared() > 1e-6f ? Vector3.Normalize(dto.MotorAxis) : Vector3.UnitX,
                 Delay = dto.Delay <= 0 ? 1.5f : dto.Delay,
                 Remaining = dto.Remaining <= 0 ? dto.Delay : dto.Remaining,
                 TimerRunning = dto.TimerRunning,
