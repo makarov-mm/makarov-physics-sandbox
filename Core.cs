@@ -2,7 +2,9 @@ using MakarovPhysicsSandbox.Physics;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using MakarovPhysicsSandbox.Campaign;
 using MakarovPhysicsSandbox.Core;
+using MakarovPhysicsSandbox.Material;
 
 namespace MakarovPhysicsSandbox;
 
@@ -137,25 +139,8 @@ internal sealed partial class GlPanel : Control
     private float _toolLastScaleFactor = 1f;
     private Vector3 _aimPoint;
     private bool _aimValid;
-    private int _lastSpawnKind = 2;
     private const float MuzzleSpeed = 26f;
     private static readonly Vector3 DefaultGravity = new(0, -9.81f, 0);
-
-    // ---- effects (sparks + trails + short-lived VFX beams) ----
-    private struct Particle
-    {
-        public Vector3 Pos, Vel, Color;
-        public float Life, MaxLife, Size;
-        public bool Gravity;
-        public bool Smoke;     // smoke renders non-emissive and expands as it ages
-    }
-
-    private struct Beam
-    {
-        public Vector3 A, B, Color;
-        public float Life, MaxLife, Thickness;
-    }
-
     private readonly List<Particle> _particles = new(1024);
     private readonly List<Beam> _beams = new(128);
     private const int MaxParticles = 1200;
@@ -2188,7 +2173,6 @@ internal sealed partial class GlPanel : Control
     private void SpawnBody(int kind)
     {
         EvictIfFull();
-        _lastSpawnKind = kind;
 
         float J() => (float)_rng.NextDouble(); // jitter helper
 
@@ -2650,12 +2634,6 @@ internal sealed partial class GlPanel : Control
         else
             projectile.Sleeping = true;
         _world.Bodies.Add(projectile);
-    }
-
-    private sealed class VehicleRig
-    {
-        public readonly List<RigidBody> Bodies = new(5);
-        public readonly List<Joint> Joints = new(8);
     }
 
     private static VehicleRig MakeVehicle(Vector3 pos, float k)

@@ -1,52 +1,14 @@
 using MakarovPhysicsSandbox.Physics;
 using System.Numerics;
+using MakarovPhysicsSandbox.Campaign;
 using MakarovPhysicsSandbox.Core;
+using MakarovPhysicsSandbox.Material;
 
 namespace MakarovPhysicsSandbox;
 
 internal sealed partial class GlPanel
 {
-    private sealed class SceneMechanism
-    {
-        public string Id = SceneId.New("mechanism");
-        public string Name = "Mechanism";
-        public string DisplayName
-        {
-            get => string.IsNullOrWhiteSpace(Name) ? Id : Name;
-            set => Name = value;
-        }
-
-        public MechanismKind Kind;
-        public Vector3 Position;
-        public bool Enabled = true;
-        public bool Active;
-        public float Radius = 6.0f;
-        public float Strength = 1.0f;
-
-        // Optional body owned by the mechanism: motor arm or gate body.
-        public RigidBody? Body;
-
-        // Gate state.
-        public Vector3 ClosedPosition;
-        public Vector3 OpenPosition;
-        public float OpenAmount;
-        public float OpenSpeed = 1.6f;
-
-        // Motor state.
-        public Vector3 MotorAxis = Vector3.UnitY;
-        public float MotorSpeed = 5.0f;
-        public float MotorTorque = 1.0f;
-        public float MotorSpin;
-
-        // Timer state.
-        public float Delay = 1.5f;
-        public float Remaining;
-        public bool TimerRunning;
-        public TimerMechanismAction TimerAction = TimerMechanismAction.Chain;
-    }
-
     private readonly List<SceneMechanism> _mechanisms = new();
-
     public void SpawnMotor() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Motor); Focus(); } }
     public void SpawnGate()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Gate); Focus(); } }
     public void SpawnTimer() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Timer); Focus(); } }
@@ -68,15 +30,17 @@ internal sealed partial class GlPanel
             return;
         }
 
-        var tr = _selectedTrigger;
-        var wanted = MechanismKindForTriggerAction(tr.Action);
+        SceneTrigger? tr = _selectedTrigger;
+        MechanismKind? wanted = MechanismKindForTriggerAction(tr.Action);
         SceneMechanism? best = null;
         float bestSq = float.MaxValue;
+
         foreach (var m in _mechanisms)
         {
             if (!m.Enabled) continue;
             if (wanted.HasValue && m.Kind != wanted.Value) continue;
             float d = Vector3.DistanceSquared(tr.Position, m.Position);
+
             if (d < bestSq)
             {
                 bestSq = d;
@@ -85,9 +49,9 @@ internal sealed partial class GlPanel
         }
 
         // If the trigger action is not mechanism-specific, fall back to the nearest mechanism.
-        if (best == null && wanted.HasValue)
+        if (best is null && wanted.HasValue)
         {
-            foreach (var m in _mechanisms)
+            foreach (SceneMechanism m in _mechanisms)
             {
                 if (!m.Enabled) continue;
                 float d = Vector3.DistanceSquared(tr.Position, m.Position);
@@ -1008,7 +972,7 @@ internal sealed partial class GlPanel
             startConveyorPlate.Outputs.Add(new TriggerOutput { TargetId = conveyor.Id, TargetName = conveyor.DisplayName, Action = TriggerActionKind.StartConveyor, Delay = 1.15f, Radius = 7.0f, Strength = 1.0f, Enabled = true });
         _triggers.Add(startConveyorPlate);
 
-        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-6.2f, 0.72f, 0f), 0.32f, density: 3.0f), MaterialId.Metal);
+        RigidBody ball = WithMaterial(RigidBody.CreateSphere(new Vector3(-6.2f, 0.72f, 0f), 0.32f, density: 3.0f), MaterialId.Metal);
         ball.Velocity = new Vector3(4.2f, 0f, 0f);
         AddBody(ball, new Vector3(0.95f, 0.86f, 0.36f));
 
@@ -1031,28 +995,4 @@ internal sealed partial class GlPanel
         _ragdolls.SpawnAndroid(_world, new Vector3(5.4f, 0f, 1.3f));
         StatusUpdated?.Invoke("Preset: Conveyor Chain Lab — plate starts timer, timer opens gate and starts conveyor, crates push barrel into wall.");
     }
-}
-
-public sealed class SceneMechanismDto
-{
-    public string Id { get; set; } = "";
-    public string Name { get; set; } = "Mechanism";
-    public string DisplayName { get; set; } = "";
-    public string Kind { get; set; } = "Timer";
-    public Vector3 Position { get; set; } = new();
-    public bool Enabled { get; set; } = true;
-    public bool Active { get; set; }
-    public float Radius { get; set; } = 6.0f;
-    public float Strength { get; set; } = 1.0f;
-    public Vector3 ClosedPosition { get; set; } = new();
-    public Vector3 OpenPosition { get; set; } = new();
-    public float OpenAmount { get; set; }
-    public float OpenSpeed { get; set; } = 1.6f;
-    public float MotorSpeed { get; set; } = 5.0f;
-    public float MotorTorque { get; set; } = 1.0f;
-    public Vector3 MotorAxis { get; set; } = Vector3.UnitX;
-    public float Delay { get; set; } = 1.5f;
-    public float Remaining { get; set; } = 1.5f;
-    public bool TimerRunning { get; set; }
-    public string TimerAction { get; set; } = "Chain";
 }

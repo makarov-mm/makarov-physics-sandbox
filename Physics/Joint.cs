@@ -8,7 +8,7 @@ namespace MakarovPhysicsSandbox.Physics;
 /// Distance holds them a fixed length apart (a rigid rod); Rope only resists stretching.
 /// If body B is null the joint is pinned to a fixed point in the world.
 /// </summary>
-internal sealed class Joint
+public sealed class Joint
 {
     public enum Kind { Point, Distance, Rope, Spring }
 

@@ -1,6 +1,8 @@
 using MakarovPhysicsSandbox.Physics;
 using System.Numerics;
 using MakarovPhysicsSandbox.Core;
+using MakarovPhysicsSandbox.Dto;
+using MakarovPhysicsSandbox.Material;
 
 namespace MakarovPhysicsSandbox;
 
