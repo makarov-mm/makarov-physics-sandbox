@@ -1595,7 +1595,7 @@ internal sealed partial class GlPanel : Control
                 {
                     if (Math.Abs(x) == 2 || Math.Abs(z) == 2 || y % 2 == 0)
                     {
-                        var b = MakeBreakable(RigidBody.CreateBox(new Vector3(x * 0.55f, 0.28f + y * 0.56f, z * 0.55f), new Vector3(0.25f), density: 1.0f), threshold: 5.8f);
+                        var b = MakeBreakable(RigidBody.CreateBox(new Vector3(x * 0.55f, 0.28f + y * 0.56f, z * 0.55f), new Vector3(0.25f), density: 1.0f), threshold: 4.8f);
                         b.Friction = 0.65f;
                         AddBody(b, Palette[Math.Abs(x + z + y + 20) % Palette.Length]);
                         _challengeBodies.Add(b);
@@ -1736,7 +1736,7 @@ internal sealed partial class GlPanel : Control
                 {
                     if (Math.Abs(x) == 2 || Math.Abs(z) == 2 || y % 2 == 0)
                     {
-                        var b = MakeBreakable(RigidBody.CreateBox(new Vector3(x * 0.55f, 0.28f + y * 0.56f, z * 0.55f), new Vector3(0.25f, 0.25f, 0.25f), density: 1.1f), threshold: 5.8f);
+                        var b = MakeBreakable(RigidBody.CreateBox(new Vector3(x * 0.55f, 0.28f + y * 0.56f, z * 0.55f), new Vector3(0.25f, 0.25f, 0.25f), density: 1.1f), threshold: 4.8f);
                         b.Friction = 0.65f;
                         b.Restitution = 0.08f;
                         AddBody(b, Palette[Math.Abs(x + z + y + 20) % Palette.Length]);
@@ -2207,44 +2207,44 @@ internal sealed partial class GlPanel : Control
 
         float J() => (float)_rng.NextDouble(); // jitter helper
 
-        // drop the new object from above wherever the user is aiming; without a valid
-        // aim point (mouse off the arena) fall back to a small random spot near the middle
+        // Place the new object resting on whatever the user is aiming at (floor or the top of
+        // another object) instead of dropping it from high up — dropping made it slam into the
+        // ground above its break threshold and shatter on placement.
         float ax = _aimValid ? _aimPoint.X : (float)(_rng.NextDouble() * 4 - 2);
         float az = _aimValid ? _aimPoint.Z : (float)(_rng.NextDouble() * 4 - 2);
+        float ay = _aimValid ? _aimPoint.Y : 0f;
         float lim = ArenaHalf - 1f;
         ax = Math.Clamp(ax + (J() - 0.5f), -lim, lim);
         az = Math.Clamp(az + (J() - 0.5f), -lim, lim);
-        var pos = new Vector3(ax, 7.5f, az);
+        Vector3 At(float halfY) => new(ax, ay + halfY + 0.04f, az);
 
-        RigidBody body = kind switch
+        RigidBody body;
+        switch (kind)
         {
-            1 => RigidBody.CreateSphere(pos, 0.35f + J() * 0.4f),
-            3 => WithMaterial(RigidBody.CreateCapsule(pos, 0.28f + J() * 0.18f), MaterialId.Metal),
-            4 => WithMaterial(RigidBody.CreateBox(pos, new Vector3(           // plank
-                     0.75f + J() * 0.35f, 0.10f + J() * 0.05f, 0.45f + J() * 0.15f)), MaterialId.Wood),
-            5 => WithMaterial(RigidBody.CreateBox(pos, new Vector3(           // pillar
-                     0.20f + J() * 0.08f, 0.75f + J() * 0.35f, 0.20f + J() * 0.08f)), MaterialId.Wood),
-            6 => MakeDumbbell(pos, 0.8f + J() * 0.5f),
-            7 => MakeHammer(pos, 0.9f + J() * 0.4f),
-            8 => MakeTable(pos, 0.9f + J() * 0.3f),
-            _ => WithMaterial(RigidBody.CreateBox(pos, new Vector3(
-                     0.3f + J() * 0.45f, 0.3f + J() * 0.45f, 0.3f + J() * 0.45f)), MaterialId.Wood),
-        };
+            case 1: { float r = 0.35f + J() * 0.4f; body = RigidBody.CreateSphere(At(r), r); break; }
+            case 3: { float r = 0.28f + J() * 0.18f; body = WithMaterial(RigidBody.CreateCapsule(At(r * 2f), r), MaterialId.Metal); break; }
+            case 4: { var h = new Vector3(0.75f + J() * 0.35f, 0.10f + J() * 0.05f, 0.45f + J() * 0.15f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // plank
+            case 5: { var h = new Vector3(0.20f + J() * 0.08f, 0.75f + J() * 0.35f, 0.20f + J() * 0.08f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // pillar
+            case 6: body = MakeDumbbell(At(0.45f), 0.8f + J() * 0.5f); break;
+            case 7: body = MakeHammer(At(0.55f), 0.9f + J() * 0.4f); break;
+            case 8: body = WithMaterial(MakeTable(At(0.55f), 0.9f + J() * 0.3f), MaterialId.Wood); break;
+            default: { var h = new Vector3(0.3f + J() * 0.45f, 0.3f + J() * 0.45f, 0.3f + J() * 0.45f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; }
+        }
 
+        // Yaw-only variety so flat objects still sit flat where placed (no tumbling onto a corner).
         if (body.Children.Length > 1 || body.Children[0].Shape != ShapeType.Sphere)
         {
-            body.Rotation = Quaternion.CreateFromYawPitchRoll(
-                J() * MathF.PI, J() * 0.6f, J() * 0.6f);
+            body.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, J() * MathF.Tau);
             body.UpdateDerived();
         }
         if (body.MaterialId == MaterialId.Wood && !body.Breakable)
         {
             body.Breakable = true;
-            body.BreakThreshold = 4.1f;
+            body.BreakThreshold = 5.0f;   // survives gentle placement, breaks when smashed
             body.BreakPieces = 10;
         }
         body.Color = body.MaterialId == MaterialId.Wood ? Vector3.One : Palette[_rng.Next(Palette.Length)];
-        body.Velocity = new Vector3(0, -1.5f, 0);
+        body.Velocity = Vector3.Zero;
         _world.Bodies.Add(body);
     }
 
@@ -2390,7 +2390,7 @@ internal sealed partial class GlPanel : Control
     {
         EvictIfFull();
         var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.66f, 0f);
-        var barrel = WithMaterial(MakeBreakable(RigidBody.CreateBox(p, new Vector3(0.36f, 0.62f, 0.36f), density: 1.05f), threshold: 2.6f, pieces: 10), MaterialId.Explosive);
+        var barrel = WithMaterial(RigidBody.CreateBox(p, new Vector3(0.36f, 0.62f, 0.36f), density: 1.05f), MaterialId.Explosive);
         barrel.Color = new Vector3(1.0f, 1.0f, 1.0f);
         barrel.Tag = "ExplosiveBarrel";
         barrel.Restitution = 0.18f;
@@ -3284,7 +3284,7 @@ internal sealed partial class GlPanel : Control
 
             bool hot = b.Burning || b.Temperature > 230f;
             bool shocked = b.Charge > 0.72f;
-            bool hardHit = b.Velocity.LengthSquared() > 220f;
+            bool hardHit = b.Velocity.LengthSquared() > 90f;
             if (hot || shocked || hardHit) (detonate ??= new List<RigidBody>()).Add(b);
         }
 
