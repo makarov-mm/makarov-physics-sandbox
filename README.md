@@ -364,3 +364,14 @@ Current visual rule: physics shapes may stay simplified, but important props can
   - Hammer and dumbbell compound shapes were adjusted so handles and metal parts overlap visually instead of appearing detached.
   - Impact/break sounds were rate-limited and lowered to avoid noisy machine-gun audio from piles of small debris.
 
+- **2026-06-14 — M4.8 source layout / type-per-file cleanup pass**
+  - Added `ARCHITECTURE.md` with explicit source layout rules and remaining cleanup targets.
+  - Split the monolithic `Core.cs` into focused `GlPanel` partial files: player actions, input, presets/challenges, spawning, triggers, effects/audio, tools/selection/camera and rendering.
+  - Kept behavior intentionally unchanged; this pass is structural, not a gameplay pass.
+  - Moved small `GlPanel` data types into separate files: `Particle`, `Beam`, `VehicleRig` and `SceneMechanism`.
+  - Split campaign types into `Campaign/`: `ChallengeKind`, `ChallengeResult`, `LevelDef`, `LevelCatalog` and `CampaignProgress`.
+  - Split material data types into `Materials/MaterialId.cs` and `Materials/MaterialDefinition.cs`; `Materials.cs` now only contains the registry.
+  - Moved `LaunchOptions` out of `Program.cs`.
+  - Fixed a syntax issue in `CampaignProgress.CompletedCount` noticed during the split.
+  - Rule going forward: no new large feature should be added directly to `Core.cs`; new user-facing features must be exposed consistently in Dev UI, Player UI, help/docs and presets when applicable.
+

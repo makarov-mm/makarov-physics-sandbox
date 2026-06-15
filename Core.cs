@@ -89,8 +89,8 @@ internal sealed partial class GlPanel : Control
 
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
-    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _planeMesh = null!, _waterMesh = null!;
-    private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal, _texBeachBall, _texMetalCube, _texGasCylinder;
+    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _planeMesh = null!, _waterMesh = null!, _quadMesh = null!;
+    private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal, _texBeachBall, _texMetalCube, _texGasCylinder, _texSoftParticle;
     private uint _bumpCrate, _bumpBrick, _bumpCartWood, _bumpRustyMetal, _bumpBall, _bumpBowlingPin, _bumpGlass, _bumpVehicle, _bumpTire, _bumpBarrel, _bumpBeachBall, _bumpMetalCube, _bumpGasCylinder;
     private uint _shadowFbo, _shadowTex;
     private const int ShadowSize = 2048;
@@ -106,6 +106,8 @@ internal sealed partial class GlPanel : Control
     private Matrix4x4 _view, _proj;
     private uint _skyProgram;
     private int _uSkyModel, _uSkyView, _uSkyProj, _uSkyCamPos, _uSkyTime;
+    private uint _particleProgram;
+    private int _uPModel, _uPView, _uPProj, _uPColor, _uPAlpha;
 
     // ---- input state ----
     private bool _rmbDown;
@@ -115,6 +117,11 @@ internal sealed partial class GlPanel : Control
     // ---- sandbox state ----
     private bool _paused;
     private bool _slowMo;
+    // Cinematic payoff on big blasts: a brief auto slow-mo that eases back to normal speed,
+    // plus a camera zoom-punch and decaying shake. Purely visual; never blocks input.
+    private float _cinematicTime;      // remaining real-time seconds
+    private float _cinematicDuration;  // total, for easing
+    private float _cinematicShake;     // current shake intensity
     private bool _zeroG;
     private bool _stepOnce;
     private PendingSceneActionKind _pendingSceneAction;
@@ -586,11 +593,21 @@ internal sealed partial class GlPanel : Control
         if (_world.Grabbed != null)
             _world.DragTarget = ComputeDragTarget();
 
+        // Combined time scale: manual slow-mo and the cinematic ease-back.
+        float simScale = _slowMo ? 0.2f : 1f;
+        if (_cinematicTime > 0f && !_paused)
+        {
+            float t = 1f - _cinematicTime / MathF.Max(_cinematicDuration, 1e-3f); // 0 at start -> 1 at end
+            simScale *= 0.25f + 0.75f * t * t;                                     // 0.25x slow easing back to 1x
+            _cinematicTime -= dt;
+            if (_cinematicTime < 0f) _cinematicTime = 0f;
+        }
+
         if (_stepOnce) { _world.Step(PhysicsWorld.FixedStep); _stepOnce = false; }
-        else if (!_paused) _world.Step(_slowMo ? dt * 0.2f : dt);
+        else if (!_paused) _world.Step(dt * simScale);
         LockWheelAxes();
 
-        float simDt = _paused ? 0f : (_slowMo ? dt * 0.2f : dt);
+        float simDt = _paused ? 0f : dt * simScale;
         UpdateMechanisms(simDt);
         UpdateTriggers(simDt);
         UpdateTriggerOutputs(simDt);
@@ -882,6 +899,18 @@ internal sealed partial class GlPanel : Control
             _uSkyTime = GL.GetUniformLocation(_skyProgram, "uTime");
         }
         catch { _skyProgram = 0; }
+
+        // Billboard particle program (fire/smoke). Falls back to sphere particles if it fails to build.
+        try
+        {
+            _particleProgram = Shaders.Build(Shaders.ParticleVertex, Shaders.ParticleFragment);
+            _uPModel = GL.GetUniformLocation(_particleProgram, "uModel");
+            _uPView = GL.GetUniformLocation(_particleProgram, "uView");
+            _uPProj = GL.GetUniformLocation(_particleProgram, "uProj");
+            _uPColor = GL.GetUniformLocation(_particleProgram, "uColor");
+            _uPAlpha = GL.GetUniformLocation(_particleProgram, "uAlpha");
+        }
+        catch { _particleProgram = 0; }
         _depthProgram = Shaders.Build(Shaders.DepthVertex, Shaders.DepthFragment);
 
         _uModel = GL.GetUniformLocation(_mainProgram, "uModel");
@@ -912,6 +941,7 @@ internal sealed partial class GlPanel : Control
         _texCrate = Textures.WoodCrateAlbedo();
         _texStripes = Textures.CreateStripes();
         _texMetal = Textures.CreateMetal();
+        _texSoftParticle = Textures.SoftParticle();
         _texConcrete = Textures.CreateConcrete();
         _texBarrel = Textures.LoadOrCreate("barrel_albedo.png", () => Textures.CreateBarrel());
         _texAndroid = Textures.CreateAndroidPanel();
@@ -947,6 +977,7 @@ internal sealed partial class GlPanel : Control
         _cylinderMesh = Mesh.CreateCylinder();
         _planeMesh = Mesh.CreatePlane();
         _waterMesh = Mesh.CreateGridPlane(64);
+        _quadMesh = Mesh.CreateBillboardQuad();
 
         // ---- shadow map FBO ----
         var tex = new uint[1];
@@ -3863,8 +3894,18 @@ internal sealed partial class GlPanel : Control
         });
     }
 
+    private void TriggerCinematic(Vector3 center, float strength)
+    {
+        if (_paused) return;
+        float dur = Math.Clamp(0.55f + strength * 0.05f, 0.55f, 1.2f);
+        if (_cinematicTime < dur) { _cinematicTime = dur; _cinematicDuration = dur; }
+        _cinematicShake = Math.Clamp(strength * 0.03f, 0.06f, 0.30f);
+        _ = center;
+    }
+
     private void SpawnExplosionFeedback(Vector3 center, float radius)
     {
+        if (radius >= 3.5f) TriggerCinematic(center, radius);   // only sizeable blasts earn a cinematic
         // Fast radial particles plus a flat bright disk give a cheap shockwave impression.
         for (int i = 0; i < 48 && _particles.Count < MaxParticles; i++)
         {
@@ -4277,11 +4318,23 @@ internal sealed partial class GlPanel : Control
         _camDist = Math.Clamp(_camDist, 4f, 45f);
 
         float cp = MathF.Cos(_camPitch), sp = MathF.Sin(_camPitch);
+        // cinematic weight: 1 at the moment of the blast, easing to 0
+        float cine = (_cinematicTime > 0f && _cinematicDuration > 0f) ? _cinematicTime / _cinematicDuration : 0f;
+        float zoom = 1f - 0.16f * cine;   // brief punch-in
         var offset = new Vector3(
             cp * MathF.Sin(_camYaw),
             sp,
-            cp * MathF.Cos(_camYaw)) * _camDist;
+            cp * MathF.Cos(_camYaw)) * (_camDist * zoom);
         _camPos = _camTarget + offset;
+
+        if (cine > 0f)
+        {
+            float sh = _cinematicShake * cine * cine;   // strong then fades
+            _camPos += new Vector3(
+                (float)_rng.NextDouble() * 2f - 1f,
+                (float)_rng.NextDouble() * 2f - 1f,
+                (float)_rng.NextDouble() * 2f - 1f) * sh;
+        }
 
         _view = Matrix4x4.CreateLookAt(_camPos, _camTarget, Vector3.UnitY);
         _proj = GlPerspective(MathF.PI / 4f, _width / (float)_height, 0.1f, 200f);
@@ -5128,7 +5181,67 @@ internal sealed partial class GlPanel : Control
         GL.Uniform1(_uEmissive, 0f);
     }
 
+    private static Matrix4x4 Billboard(Vector3 pos, float s, Vector3 r, Vector3 u, Vector3 n) => new(
+        r.X * s, r.Y * s, r.Z * s, 0f,
+        u.X * s, u.Y * s, u.Z * s, 0f,
+        n.X,     n.Y,     n.Z,     0f,
+        pos.X,   pos.Y,   pos.Z,   1f);
+
     private void DrawParticles()
+    {
+        if (_particles.Count == 0) return;
+        if (_particleProgram == 0) { DrawParticlesFallback(); return; }
+
+        // Camera basis (world space) from the view matrix, so quads always face the camera.
+        var camRight = new Vector3(_view.M11, _view.M21, _view.M31);
+        var camUp = new Vector3(_view.M12, _view.M22, _view.M32);
+        var camFwd = new Vector3(-_view.M13, -_view.M23, -_view.M33);
+
+        GL.UseProgram(_particleProgram);
+        GL.UniformMatrix4(_uPView, ToArray(_view));
+        GL.UniformMatrix4(_uPProj, ToArray(_proj));
+        GL.ActiveTexture(GL.TEXTURE0);
+        GL.BindTexture(GL.TEXTURE_2D, _texSoftParticle);   // sampler defaults to unit 0
+        GL.Enable(GL.BLEND);
+        GL.DepthMask(0);
+        GL.Disable(GL.CULL_FACE);
+
+        // Fire / sparks: additive blending so overlapping puffs glow.
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE);
+        bool anySmoke = false;
+        foreach (var p in _particles)
+        {
+            if (p.Smoke) { anySmoke = true; continue; }
+            float fade = p.Life / p.MaxLife;
+            GL.Uniform3(_uPColor, p.Color.X, p.Color.Y, p.Color.Z);
+            GL.Uniform1(_uPAlpha, fade);
+            GL.UniformMatrix4(_uPModel, ToArray(Billboard(p.Pos, p.Size * (2.6f + (1f - fade) * 1.4f), camRight, camUp, camFwd)));
+            _quadMesh.Draw();
+        }
+
+        // Smoke: standard alpha blending, soft and expanding.
+        if (anySmoke)
+        {
+            GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+            foreach (var p in _particles)
+            {
+                if (!p.Smoke) continue;
+                float fade = p.Life / p.MaxLife;
+                float shade = 0.20f + (1f - fade) * 0.18f;
+                GL.Uniform3(_uPColor, shade, shade, shade);
+                GL.Uniform1(_uPAlpha, fade * 0.55f);
+                GL.UniformMatrix4(_uPModel, ToArray(Billboard(p.Pos, p.Size * (3.0f + (1f - fade) * 4.0f), camRight, camUp, camFwd)));
+                _quadMesh.Draw();
+            }
+        }
+
+        GL.Enable(GL.CULL_FACE);
+        GL.DepthMask(1);
+        GL.Disable(GL.BLEND);
+        GL.UseProgram(_mainProgram);   // restore main program for the rest of the frame
+    }
+
+    private void DrawParticlesFallback()
     {
         if (_particles.Count == 0) return;
         GL.BindTexture(GL.TEXTURE_2D, _texMetal);

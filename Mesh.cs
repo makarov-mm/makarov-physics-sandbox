@@ -230,6 +230,21 @@ internal sealed class Mesh
         return new Mesh(verts.ToArray(), idx.ToArray());
     }
 
+    /// <summary>Unit quad in the local XY plane ([-0.5,0.5], normal +Z, UV 0..1). Used for
+    /// camera-facing billboard particles (fire/smoke), oriented via a billboard model matrix.</summary>
+    public static Mesh CreateBillboardQuad()
+    {
+        float[] verts =
+        {
+            -0.5f, -0.5f, 0,  0, 0, 1,  0, 0,
+             0.5f, -0.5f, 0,  0, 0, 1,  1, 0,
+             0.5f,  0.5f, 0,  0, 0, 1,  1, 1,
+            -0.5f,  0.5f, 0,  0, 0, 1,  0, 1,
+        };
+        uint[] idx = { 0, 1, 2, 0, 2, 3 };
+        return new Mesh(verts, idx);
+    }
+
     public static Mesh CreatePlane()
     {
         float[] verts =

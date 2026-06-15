@@ -202,6 +202,36 @@ internal static class Shaders
     // exactly one sun, a smooth horizon->zenith gradient and drifting clouds, with no cube seams
     // or repeated suns (unlike a 2D texture wrapped on a cube). Runs as its own program; if it
     // fails to compile/link the engine falls back to the textured skybox cube.
+    public const string ParticleVertex = """
+        #version 410 core
+        layout(location = 0) in vec3 aPos;
+        layout(location = 1) in vec3 aNormal;
+        layout(location = 2) in vec2 aUV;
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProj;
+        out vec2 vUV;
+        void main()
+        {
+            vUV = aUV;
+            gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
+        }
+        """;
+
+    public const string ParticleFragment = """
+        #version 410 core
+        in vec2 vUV;
+        out vec4 FragColor;
+        uniform sampler2D uTex;
+        uniform vec3 uColor;
+        uniform float uAlpha;
+        void main()
+        {
+            float m = texture(uTex, vUV).r;          // soft round mask
+            FragColor = vec4(uColor, uAlpha * m);
+        }
+        """;
+
     public const string SkyVertex = """
         #version 410 core
         layout(location = 0) in vec3 aPos;

@@ -376,6 +376,20 @@ internal static class Textures
     }
 
     /// <summary>Simple fake skybox texture: soft vertical gradient with sparse cloud noise.</summary>
+    /// <summary>A soft round particle mask: white at the centre fading smoothly to transparent at
+    /// the edge (stored in RGB; the particle shader reads the red channel as the alpha mask).</summary>
+    public static uint SoftParticle(int size = 64)
+    {
+        return Upload(Generate(size, (u, v) =>
+        {
+            float dx = u - 0.5f, dy = v - 0.5f;
+            float d = MathF.Min(1f, MathF.Sqrt(dx * dx + dy * dy) * 2f); // 0 centre .. 1 edge
+            float m = 1f - d;
+            m = m * m * (3f - 2f * m);  // smoothstep falloff
+            return (m, m, m);
+        }), size);
+    }
+
     public static uint CreateSkybox(int size = 512)
     {
         return Upload(Generate(size, (u, v) =>
