@@ -605,16 +605,18 @@ internal sealed partial class GlPanel
 
     private void DrawConveyorMarker(SceneMechanism m, float t)
     {
-        var p = m.Position + new Vector3(0, 0.085f, 0);   // sit on the belt top (box half-height 0.08), not above it
         var dir = m.MotorAxis.LengthSquared() < 1e-6f ? Vector3.UnitX : Vector3.Normalize(m.MotorAxis);
-        float flow = (t * MathF.Max(0.2f, m.Strength)) % 1.0f;
+        var perp = Vector3.Cross(Vector3.UnitY, dir);
+        perp = perp.LengthSquared() < 1e-6f ? Vector3.UnitZ : Vector3.Normalize(perp);
+        var p = m.Position + new Vector3(0, 0.10f, 0);   // just above the belt top (box half-height 0.08)
+        float flow = (t * MathF.Max(0.2f, m.Strength)) % 0.8f;
         var color = m.Active ? new Vector3(0.25f, 0.90f, 1.0f) : new Vector3(0.18f, 0.36f, 0.42f);
         GL.Uniform3(_uColor, color.X, color.Y, color.Z);
         for (int i = -2; i <= 2; i++)
         {
-            float x = -1.6f + i * 0.75f + flow * 0.75f;
+            float x = -1.6f + i * 0.8f + flow;          // bars slide along the belt's motion axis
             var center = p + dir * x;
-            DrawRodSegment(center - dir * 0.18f + new Vector3(0, 0.02f, -0.42f), center + dir * 0.18f + new Vector3(0, 0.02f, 0.42f), 0.025f);
+            DrawRodSegment(center - perp * 0.62f, center + perp * 0.62f, 0.03f);  // transverse, across the width
         }
     }
 

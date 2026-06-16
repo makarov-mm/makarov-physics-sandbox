@@ -43,6 +43,7 @@ namespace MakarovPhysicsSandbox
         private ToolStripButton? _wiringButton;
         private ToolStripDropDownButton? _catalogButton;
         private ContextMenuStrip _catalogContext = null!;
+        private ContextMenuStrip _presetContext = null!;
         private Panel _startOverlay = null!;
         private Label _startSubtitle = null!;
         private Panel _resultOverlay = null!;
@@ -134,6 +135,7 @@ namespace MakarovPhysicsSandbox
             BuildStartScreen();
             BuildResultOverlay();
             _catalogContext = BuildSpawnCatalogContext();
+            _presetContext = BuildPresetContext();
 
             // Add the fill control first, then the docked bars; WinForms resolves docking
             // by reverse z-order, so this leaves the GL panel filling the space between
@@ -619,6 +621,7 @@ namespace MakarovPhysicsSandbox
             };
 
             AddPlayerButton("Object", "catalog.png", "F6", ShowSpawnCatalog);
+            AddPlayerButton("Presets", "presets.png", "", ShowPresets);
             AddPlayerButton("Explosion", "explosion.png", "E", () => _gl.Detonate());
             AddPlayerButton("Shoot", "shoot.png", "F", () => _gl.Shoot());
             AddPlayerButton("Barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel());
@@ -629,7 +632,7 @@ namespace MakarovPhysicsSandbox
             AddPlayerButton("Cart", "cart.png", "", () => _gl.SpawnWoodenCart());
             AddPlayerButton("Glass", "glass.png", "", () => _gl.SpawnGlassBlock());
             AddPlayerButton("Drone", "drone.png", "", () => _gl.SpawnDroneTarget());
-            AddPlayerButton("Sentinel", "sentinel.png", "", () => _gl.SpawnSentinelBot());
+            AddPlayerButton("Target", "sentinel.png", "", () => _gl.SpawnSentinelBot());
             AddPlayerButton("Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle());
             AddPlayerButton("Police", "police.png", "", () => _gl.SpawnPoliceVehicle());
             AddPlayerButton("Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance());
@@ -776,7 +779,6 @@ namespace MakarovPhysicsSandbox
 
             AddToolbarButton(ts, "Sphere",       "sphere.png",   "1",        () => _gl.Spawn(1), placeOnScene: true);
             AddToolbarButton(ts, "Box",          "box.png",      "2",        () => _gl.Spawn(2), placeOnScene: true);
-            AddToolbarButton(ts, "Capsule",      "capsule.png",  "3",        () => _gl.Spawn(3), placeOnScene: true);
             AddToolbarButton(ts, "Plank",        "plank.png",    "4",        () => _gl.Spawn(4), placeOnScene: true);
             AddToolbarButton(ts, "Pillar",       "pillar.png",   "5",        () => _gl.Spawn(5), placeOnScene: true);
             AddToolbarButton(ts, "Dumbbell",     "dumbbell.png", "6",        () => _gl.Spawn(6), placeOnScene: true);
@@ -786,7 +788,7 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Chain",        "chain.png",    "L",        () => _gl.SpawnChain(), placeOnScene: true);
             AddToolbarButton(ts, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), placeOnScene: true);
             AddToolbarButton(ts, "Drone target",   "drone.png",   "",  () => _gl.SpawnDroneTarget(), placeOnScene: true);
-            AddToolbarButton(ts, "Sentinel bot", "sentinel.png", "", () => _gl.SpawnSentinelBot(), placeOnScene: true);
+            AddToolbarButton(ts, "Target dummy", "sentinel.png", "", () => _gl.SpawnSentinelBot(), placeOnScene: true);
             AddToolbarButton(ts, "Vehicle",       "vehicle.png", "N", () => _gl.SpawnVehicle(), placeOnScene: true);
             AddToolbarButton(ts, "Police car", "police.png", "", () => _gl.SpawnPoliceVehicle(), placeOnScene: true);
             AddToolbarButton(ts, "Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance(), placeOnScene: true);
@@ -937,7 +939,6 @@ namespace MakarovPhysicsSandbox
             var basic = CatalogCategory("Basic objects");
             AddCatalogAction(basic.DropDownItems, "Sphere", "sphere.png", "1", () => _gl.Spawn(1), "Round dynamic body");
             AddCatalogAction(basic.DropDownItems, "Box", "box.png", "2", () => _gl.Spawn(2), "General-purpose block");
-            AddCatalogAction(basic.DropDownItems, "Capsule", "capsule.png", "3", () => _gl.Spawn(3), "Rounded capsule body");
             AddCatalogAction(basic.DropDownItems, "Plank", "plank.png", "4", () => _gl.Spawn(4), "Long wooden piece");
             AddCatalogAction(basic.DropDownItems, "Pillar", "pillar.png", "5", () => _gl.Spawn(5), "Tall block / support");
             AddCatalogAction(basic.DropDownItems, "Dumbbell", "dumbbell.png", "6", () => _gl.Spawn(6), "Compound test object");
@@ -952,7 +953,7 @@ namespace MakarovPhysicsSandbox
             var dummies = CatalogCategory("Dummies & vehicles");
             AddCatalogAction(dummies.DropDownItems, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), "Synthetic crash-test dummy");
             AddCatalogAction(dummies.DropDownItems, "Drone target", "drone.png", "", () => _gl.SpawnDroneTarget(), "Small synthetic aerial target");
-            AddCatalogAction(dummies.DropDownItems, "Sentinel bot", "sentinel.png", "", () => _gl.SpawnSentinelBot(), "Small synthetic rolling ground target");
+            AddCatalogAction(dummies.DropDownItems, "Target dummy", "sentinel.png", "", () => _gl.SpawnSentinelBot(), "Bottom-heavy wobble dummy: knock it over and it rights itself, or smash it");
             AddCatalogAction(dummies.DropDownItems, "Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle(), "Simple crash-test vehicle rig");
             AddCatalogAction(dummies.DropDownItems, "Police car", "police.png", "", () => _gl.SpawnPoliceVehicle(), "Vehicle variant for crashes and bridge scenes");
             AddCatalogAction(dummies.DropDownItems, "Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance(), "Larger emergency vehicle variant");
@@ -1045,6 +1046,33 @@ namespace MakarovPhysicsSandbox
             if (_catalogContext == null) return;
             _catalogContext.Show(_gl, new Point(Math.Max(8, _gl.Width / 2 - 140), Math.Max(8, _gl.Height / 2 - 120)));
             _status.Text = "Spawn catalog opened. Choose an item, then click inside the scene to place/use it.";
+            UpdateToolbarState();
+        }
+
+        private ContextMenuStrip BuildPresetContext()
+        {
+            var cms = new ContextMenuStrip();
+            void Add(string name) => cms.Items.Add(new ToolStripMenuItem(name, null, (_, _) =>
+            {
+                _gl.LoadPreset(name);
+                _status.Text = $"Preset loaded: {name}";
+                UpdateToolbarState();
+            }));
+            foreach (var name in new[]
+            {
+                "Domino Run", "Tower Collapse", "Bridge Jump", "Catapult Bridge Siege", "Drone Target Range",
+                "Newton Cradle", "Zero-G Chaos", "Water Playground", "Android Fire Lab", "Electrical Chain Lab",
+                "Vehicle Crash Test", "Mechanism Chain Reaction", "Conveyor Chain Lab", "Piston Crusher Lab",
+                "Explosive Domino", "Barrel Pyramid",
+            }) Add(name);
+            return cms;
+        }
+
+        private void ShowPresets()
+        {
+            if (_presetContext == null) return;
+            _presetContext.Show(_gl, new Point(Math.Max(8, _gl.Width / 2 - 120), Math.Max(8, _gl.Height / 2 - 140)));
+            _status.Text = "Presets — pick a ready-made scene.";
             UpdateToolbarState();
         }
 

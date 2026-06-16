@@ -840,7 +840,6 @@ internal sealed partial class GlPanel : Control
             case 0x1B: CancelPendingSceneAction(); break;  // Esc
             case 0x31: CancelPendingSceneAction(); SpawnBody(1); break;              // 1 sphere
             case 0x32: CancelPendingSceneAction(); SpawnBody(2); break;              // 2 box
-            case 0x33: CancelPendingSceneAction(); SpawnBody(3); break;              // 3 capsule
             case 0x34: CancelPendingSceneAction(); SpawnBody(4); break;              // 4 plank
             case 0x35: CancelPendingSceneAction(); SpawnBody(5); break;              // 5 pillar
             case 0x36: CancelPendingSceneAction(); SpawnBody(6); break;              // 6 dumbbell
@@ -1027,16 +1026,22 @@ internal sealed partial class GlPanel : Control
         ClearChallenge();
         AddWalls();
 
-        // a small stack of boxes
+        // a small stack of boxes (breakable wood, same as ones you place yourself)
         for (int i = 0; i < 4; i++)
         {
-            var b = RigidBody.CreateBox(new Vector3(-2.5f, 0.55f + i * 1.12f, 0), new Vector3(0.55f));
+            var b = WithMaterial(RigidBody.CreateBox(new Vector3(-2.5f, 0.55f + i * 1.12f, 0), new Vector3(0.55f)), MaterialId.Wood);
+            b.Breakable = true;
+            b.BreakThreshold = 5.0f;
+            b.BreakPieces = 10;
             b.Color = Palette[i % Palette.Length];
             _world.Bodies.Add(b);
         }
 
         // a couple of bigger boxes
-        var big = RigidBody.CreateBox(new Vector3(2.2f, 0.8f, -1.5f), new Vector3(0.8f, 0.8f, 0.8f));
+        var big = WithMaterial(RigidBody.CreateBox(new Vector3(2.2f, 0.8f, -1.5f), new Vector3(0.8f, 0.8f, 0.8f)), MaterialId.Wood);
+        big.Breakable = true;
+        big.BreakThreshold = 5.0f;
+        big.BreakPieces = 12;
         big.Color = Palette[4];
         _world.Bodies.Add(big);
 
@@ -1057,11 +1062,7 @@ internal sealed partial class GlPanel : Control
         dumbbell.Color = Palette[1];
         _world.Bodies.Add(dumbbell);
 
-        var hammer = MakeHammer(new Vector3(-3.5f, 3f, 2.5f));
-        hammer.Rotation = Quaternion.CreateFromYawPitchRoll(0.7f, 0.9f, 0f);
-        hammer.UpdateDerived();
-        hammer.Color = Palette[6 % Palette.Length];
-        _world.Bodies.Add(hammer);
+        AddHammer(new Vector3(-3.5f, 3f, 2.5f), 1f, Quaternion.CreateFromYawPitchRoll(0.7f, 0.9f, 0f), Palette[6 % Palette.Length]);
 
         var table = MakeTable(new Vector3(0f, 1.2f, -3f));
         table.Color = Palette[3];
@@ -1771,9 +1772,11 @@ internal sealed partial class GlPanel : Control
 
         var left = RigidBody.CreateStaticBox(center + new Vector3(-supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f));
         left.Color = new Vector3(0.25f, 0.27f, 0.30f);
+        left.Tag = "BridgeSupport";
         _world.Bodies.Add(left);
         var right = RigidBody.CreateStaticBox(center + new Vector3(supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f));
         right.Color = new Vector3(0.25f, 0.27f, 0.30f);
+        right.Tag = "BridgeSupport";
         _world.Bodies.Add(right);
 
         for (int i = 0; i < plankCount; i++)
@@ -1815,17 +1818,25 @@ internal sealed partial class GlPanel : Control
         ResetToEmptyScene();
         AddBridgeSpan(Vector3.Zero, length: 8.2f, width: 2.2f, plankCount: 11, withCargo: false);
 
-        var rig = MakeVehicle(new Vector3(-7.8f, 1.35f, 0f), 0.85f);
-        rig.Bodies[0].Velocity = new Vector3(7.5f, 0.0f, 0f);
+        // Approach ramp from the ground up to the left deck end, so the car can actually get onto
+        // the bridge (the deck sits at +1.15 and previously the car just rammed the support).
+        var ramp = RigidBody.CreateStaticBox(new Vector3(-6.0f, 0.6f, 0f), new Vector3(1.7f, 0.12f, 1.3f));
+        ramp.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, 0.33f);   // +X end raised to deck height
+        ramp.UpdateDerived();
+        ramp.Color = new Vector3(0.38f, 0.40f, 0.45f);
+        _world.Bodies.Add(ramp);
+
+        var rig = MakeVehicle(new Vector3(-7.7f, 0.7f, 0f), 0.85f);
+        rig.Bodies[0].Velocity = new Vector3(9.0f, 0.0f, 0f);
         foreach (var b in rig.Bodies)
         {
-            if (b != rig.Bodies[0]) b.Velocity = new Vector3(7.5f, 0.0f, 0f);
+            if (b != rig.Bodies[0]) b.Velocity = new Vector3(9.0f, 0.0f, 0f);
             _world.Bodies.Add(b);
         }
         foreach (var j in rig.Joints) _world.Joints.Add(j);
 
         SpawnDroneTarget(new Vector3(4.4f, 2.2f, 0.0f), new Vector3(0.2f, 0.85f, 1.0f));
-        StatusUpdated?.Invoke("Preset: Bridge Jump — vehicle crosses a jointed bridge toward a drone target.");
+        StatusUpdated?.Invoke("Preset: Bridge Jump — car climbs the ramp, crosses the bridge and launches at the drone.");
     }
 
     private void BuildCatapultBridgeSiege()
@@ -1888,6 +1899,11 @@ internal sealed partial class GlPanel : Control
             var ball = RigidBody.CreateSphere(new Vector3(x, 2.15f, 0f), 0.30f, density: 6f);
             ball.Restitution = 0.95f;
             ball.Friction = 0.15f;
+            // Breakable so a blast can actually destroy it; the threshold is well above the gentle
+            // clacking of normal operation, and fracturing removes the string joint (RemoveBody).
+            ball.Breakable = true;
+            ball.BreakThreshold = 7.0f;
+            ball.BreakPieces = 8;
             if (i == 0)
             {
                 ball.Position += new Vector3(-1.25f, 0.55f, 0f);
@@ -1973,20 +1989,22 @@ internal sealed partial class GlPanel : Control
     {
         // Dry electrical demo. The previous flooded version mostly demonstrated buoyancy, not electricity.
         ResetToEmptyScene(water: false);
-        _ragdolls.SpawnAndroid(_world, new Vector3(3.0f, 0f, 0f));
+        _ragdolls.SpawnAndroid(_world, new Vector3(2.6f, 0f, 0f));
 
         RigidBody? first = null;
         for (int i = 0; i < 9; i++)
         {
-            var node = WithMaterial(RigidBody.CreateSphere(new Vector3(-5.5f + i * 0.9f, 1.15f, 0f), 0.22f, density: 3.2f), MaterialId.Metal);
+            var node = WithMaterial(RigidBody.CreateSphere(new Vector3(-5.5f + i * 0.85f, 1.15f, 0f), 0.22f, density: 3.2f), MaterialId.Metal);
             node.Friction = 0.35f;
             AddBody(node, node.Color);
             first ??= node;
         }
 
-        for (int i = 0; i < 4; i++)
+        // Wet (conductive) crates bridge the last node to the android, on the ground in the chain path,
+        // so the arc has a clear route to its target instead of floating off to one side.
+        for (int i = 0; i < 3; i++)
         {
-            var wetCrate = WithMaterial(RigidBody.CreateBox(new Vector3(-1.2f + i * 0.55f, 2.8f, -1.3f), new Vector3(0.22f), density: 0.55f), MaterialId.Wood);
+            var wetCrate = WithMaterial(RigidBody.CreateBox(new Vector3(1.7f + i * 0.42f, 0.3f, 0f), new Vector3(0.22f), density: 0.55f), MaterialId.Wood);
             wetCrate.Wetness = 0.85f;
             AddBody(wetCrate, new Vector3(0.45f, 0.65f, 0.92f));
         }
@@ -2008,7 +2026,7 @@ internal sealed partial class GlPanel : Control
         var rig = MakeVehicle(new Vector3(-6.7f, 2.4f, 0f), 1.0f);
         foreach (var b in rig.Bodies)
         {
-            b.Velocity = new Vector3(5.2f, 0f, 0f);
+            b.Velocity = new Vector3(9.5f, 0f, 0f);
             _world.Bodies.Add(b);
         }
         foreach (var j in rig.Joints) _world.Joints.Add(j);
@@ -2016,7 +2034,7 @@ internal sealed partial class GlPanel : Control
         for (int y = 0; y < 4; y++)
         for (int z = -2; z <= 2; z++)
         {
-            var block = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(2.2f, 0.28f + y * 0.55f, z * 0.55f), new Vector3(0.25f), density: 1.2f), threshold: 5.2f), MaterialId.Stone);
+            var block = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(2.2f, 0.28f + y * 0.55f, z * 0.55f), new Vector3(0.25f), density: 1.2f), threshold: 3.8f), MaterialId.Stone);
             AddBody(block, new Vector3(0.60f, 0.54f, 0.48f));
         }
 
@@ -2226,7 +2244,12 @@ internal sealed partial class GlPanel : Control
             case 4: { var h = new Vector3(0.75f + J() * 0.35f, 0.10f + J() * 0.05f, 0.45f + J() * 0.15f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // plank
             case 5: { var h = new Vector3(0.20f + J() * 0.08f, 0.75f + J() * 0.35f, 0.20f + J() * 0.08f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // pillar
             case 6: body = MakeDumbbell(At(0.45f), 0.8f + J() * 0.5f); break;
-            case 7: body = MakeHammer(At(0.55f), 0.9f + J() * 0.4f); break;
+            case 7:
+            {
+                float hk = 0.9f + J() * 0.4f;
+                AddHammer(At(0.55f * hk), hk, Quaternion.CreateFromAxisAngle(Vector3.UnitY, J() * MathF.Tau), Vector3.One);
+                return;   // AddHammer adds both bodies and their joints itself
+            }
             case 8: body = WithMaterial(MakeTable(At(0.55f), 0.9f + J() * 0.3f), MaterialId.Wood); break;
             default: { var h = new Vector3(0.3f + J() * 0.45f, 0.3f + J() * 0.45f, 0.3f + J() * 0.45f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; }
         }
@@ -2260,6 +2283,40 @@ internal sealed partial class GlPanel : Control
         b.Tag = "Dumbbell";
         b.Color = new Vector3(0.82f, 0.84f, 0.86f);
         return b;
+    }
+
+    // Hammer as two welded bodies: a breakable wood handle and a NON-breakable metal head. When the
+    // handle shatters, RemoveBody drops its joints and the metal head survives intact (only the wood
+    // splinters). Three point joints (non-collinear) weld them rigidly enough to behave as one tool.
+    private void AddHammer(Vector3 pos, float k, Quaternion rot, Vector3 color)
+    {
+        var handleHalf = new Vector3(0.34f * k, 0.05f * k, 0.05f * k);
+        var headHalf = new Vector3(0.12f * k, 0.17f * k, 0.26f * k);
+        var headOffset = new Vector3(0.36f * k, 0f, 0f);
+
+        var handle = WithMaterial(RigidBody.CreateBox(pos, handleHalf, density: 0.7f), MaterialId.Wood);
+        handle.Rotation = rot; handle.UpdateDerived();
+        handle.Tag = "Hammer"; handle.Color = color;
+        handle.Breakable = true; handle.BreakThreshold = 4.5f; handle.BreakPieces = 8;
+        _world.Bodies.Add(handle);
+
+        var head = WithMaterial(RigidBody.CreateBox(pos + Vector3.Transform(headOffset, rot), headHalf, density: 4.0f), MaterialId.Metal);
+        head.Rotation = rot; head.UpdateDerived();
+        head.Tag = "Hammer"; head.Color = color;
+        head.Breakable = false;
+        _world.Bodies.Add(head);
+
+        // Weld at the junction; anchors coincide initially so there is no tug.
+        foreach (var (py, pz) in new[] { (0f, 0.16f * k), (0f, -0.16f * k), (0.12f * k, 0f) })
+        {
+            _world.Joints.Add(new Joint
+            {
+                Type = Joint.Kind.Point,
+                A = handle, B = head,
+                LocalA = new Vector3(0.30f * k, py, pz),
+                LocalB = new Vector3(-0.06f * k, py, pz),
+            });
+        }
     }
 
     private static RigidBody MakeHammer(Vector3 pos, float k = 1f)
@@ -2464,26 +2521,26 @@ internal sealed partial class GlPanel : Control
     private void SpawnSentinelBotAtAim()
     {
         EvictIfFull();
-        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.90f, 0f);
-        var bot = WithMaterial(RigidBody.CreateCompound(p, [
-            ChildShape.Box(new Vector3(0.38f, 0.34f, 0.24f), new Vector3(0f, 0.10f, 0f)),
-            ChildShape.Sphere(0.20f, new Vector3(0f, 0.58f, 0f)),
-            ChildShape.Sphere(0.18f, new Vector3(-0.34f, -0.22f, 0f)),
-            ChildShape.Sphere(0.18f, new Vector3( 0.34f, -0.22f, 0f)),
-            ChildShape.Capsule(0.07f, new Vector3(-0.50f, 0.12f, 0f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f)),
-            ChildShape.Capsule(0.07f, new Vector3( 0.50f, 0.12f, 0f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI * 0.5f)),
-        ], density: 0.85f), MaterialId.Synthetic);
-        bot.Tag = "SentinelBot";
-        bot.Color = new Vector3(0.72f, 0.88f, 0.92f);
-        bot.Restitution = 0.18f;
-        bot.Friction = 0.65f;
-        bot.Breakable = true;
-        bot.BreakThreshold = 6.2f;
-        bot.BreakPieces = 10;
-        bot.Conductivity = 0.75f;
-        bot.Flammability = 0.22f;
-        _world.Bodies.Add(bot);
-        StatusUpdated?.Invoke("Placed sentinel bot target.");
+        // Target dummy: a bottom-heavy "weeble". The big dense base sphere keeps the centre of mass
+        // low so it wobbles back upright when knocked, and it can be smashed or blown apart.
+        float ay = _aimValid ? _aimPoint.Y : 0f;
+        var p = new Vector3(_aimValid ? _aimPoint.X : 0f, ay + 0.46f, _aimValid ? _aimPoint.Z : 0f);
+        var dummy = WithMaterial(RigidBody.CreateCompound(p, [
+            ChildShape.Sphere(0.42f, new Vector3(0f, -0.10f, 0f)),   // heavy rounded base (most of the mass, low)
+            ChildShape.Sphere(0.30f, new Vector3(0f,  0.42f, 0f)),   // torso
+            ChildShape.Sphere(0.20f, new Vector3(0f,  0.86f, 0f)),   // head
+        ], density: 1.15f), MaterialId.Synthetic);
+        dummy.Tag = "SentinelBot";
+        dummy.Color = new Vector3(0.92f, 0.30f, 0.26f);             // red target so it reads as a thing to hit
+        dummy.Restitution = 0.22f;
+        dummy.Friction = 0.62f;
+        dummy.Breakable = true;
+        dummy.BreakThreshold = 6.0f;
+        dummy.BreakPieces = 10;
+        dummy.Conductivity = 0.4f;
+        dummy.Flammability = 0.25f;
+        _world.Bodies.Add(dummy);
+        StatusUpdated?.Invoke("Placed target dummy. Bottom-heavy: knock it and it wobbles back; smash or blow it apart.");
     }
 
     private void SpawnBridgeSpanAtAim()
@@ -2965,7 +3022,7 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.BeachBall => "beach ball",
         PendingSceneActionKind.MetalCube => "metal cube",
         PendingSceneActionKind.GasCylinder => "gas cylinder",
-        PendingSceneActionKind.SentinelBot => "sentinel bot",
+        PendingSceneActionKind.SentinelBot => "target dummy",
         PendingSceneActionKind.Motor => "motor hinge",
         PendingSceneActionKind.Gate => "gate",
         PendingSceneActionKind.Timer => "timer",
@@ -3284,7 +3341,7 @@ internal sealed partial class GlPanel : Control
 
             bool hot = b.Burning || b.Temperature > 230f;
             bool shocked = b.Charge > 0.72f;
-            bool hardHit = b.Velocity.LengthSquared() > 90f;
+            bool hardHit = b.Velocity.LengthSquared() > 40f;
             if (hot || shocked || hardHit) (detonate ??= new List<RigidBody>()).Add(b);
         }
 
@@ -4398,6 +4455,15 @@ internal sealed partial class GlPanel : Control
         foreach (var j in _world.Joints)
             if (j.B == null && _rotGroup.Contains(j.A)) _rotAnchorJoints.Add(j);
 
+        // Bridge supports aren't jointed, but they hold up the deck and should rotate with it. Pull in
+        // any BridgeSupport static that sits right under one of this group's world anchors.
+        foreach (var b in _world.Bodies)
+        {
+            if (!string.Equals(b.Tag as string, "BridgeSupport", StringComparison.Ordinal) || _rotGroup.Contains(b)) continue;
+            foreach (var j in _rotAnchorJoints)
+                if (Vector3.DistanceSquared(b.Position, j.LocalB) < 4f) { _rotGroup.Add(b); break; }
+        }
+
         _rotStartPos = new Vector3[_rotGroup.Count];
         _rotStartRot = new Quaternion[_rotGroup.Count];
         for (int i = 0; i < _rotGroup.Count; i++) { _rotStartPos[i] = _rotGroup[i].Position; _rotStartRot[i] = _rotGroup[i].Rotation; }
@@ -4839,10 +4905,10 @@ internal sealed partial class GlPanel : Control
              * Matrix4x4.CreateFromQuaternion(b.Rotation)
              * Matrix4x4.CreateTranslation(b.Position);
 
-        void DrawSphere(Vector3 scale, Vector3 local, Vector3 color)
+        void DrawSph(float r, float y)
         {
-            GL.Uniform3(_uColor, color.X, color.Y, color.Z);
-            GL.UniformMatrix4(_uModel, ToArray(BodyMatrix(scale, local)));
+            GL.Uniform3(_uColor, 1.0f, 0.97f, 0.88f);
+            GL.UniformMatrix4(_uModel, ToArray(BodyMatrix(new Vector3(r, r * 1.5f, r), new Vector3(0f, y, 0f))));
             _sphereMesh.Draw();
         }
 
@@ -4852,17 +4918,22 @@ internal sealed partial class GlPanel : Control
             // The previous cube bands looked like red square blocks attached to the pin.
             GL.BindTexture(GL.TEXTURE_2D, _texStripes);
             GL.Uniform3(_uColor, 0.92f, 0.04f, 0.035f);
-            GL.UniformMatrix4(_uModel, ToArray(BodyMatrix(new Vector3(0.155f, halfHeight, 0.155f), new Vector3(0f, y, 0f))));
+            GL.UniformMatrix4(_uModel, ToArray(BodyMatrix(new Vector3(0.105f, halfHeight, 0.105f), new Vector3(0f, y, 0f))));
             _sphereMesh.Draw();
             GL.BindTexture(GL.TEXTURE_2D, _texBowlingPin);
         }
 
-        var white = new Vector3(1.0f, 0.97f, 0.88f);
-        DrawSphere(new Vector3(0.24f, 0.17f, 0.24f), new Vector3(0f, -0.21f, 0f), white); // belly
-        DrawSphere(new Vector3(0.13f, 0.25f, 0.13f), new Vector3(0f,  0.10f, 0f), white); // neck/body
-        DrawSphere(new Vector3(0.115f, 0.09f, 0.115f), new Vector3(0f, 0.39f, 0f), white); // head
-        DrawBand(0.18f, 0.022f);
-        DrawBand(0.25f, 0.018f);
+        // Smooth bowling-pin silhouette from many overlapping spheres (no flat-capped cylinder steps).
+        (float y, float r)[] prof =
+        {
+            (-0.40f, 0.075f), (-0.35f, 0.115f), (-0.30f, 0.150f), (-0.25f, 0.180f), (-0.20f, 0.200f),
+            (-0.15f, 0.205f), (-0.10f, 0.195f), (-0.05f, 0.170f), ( 0.00f, 0.140f), ( 0.05f, 0.115f),
+            ( 0.10f, 0.095f), ( 0.15f, 0.080f), ( 0.20f, 0.078f), ( 0.25f, 0.085f), ( 0.30f, 0.098f),
+            ( 0.34f, 0.095f), ( 0.38f, 0.082f), ( 0.42f, 0.060f), ( 0.45f, 0.035f),
+        };
+        foreach (var (yy, rr) in prof) DrawSph(rr, yy);
+        DrawBand(0.16f, 0.020f);
+        DrawBand(0.22f, 0.018f);
 
         GL.Uniform1(_uUseBumpMap, 0f);
         GL.Uniform1(_uBumpStrength, 0f);
@@ -5754,20 +5825,21 @@ internal sealed partial class GlPanel : Control
         GL.Uniform3(_uColor, 0.12f, 0.16f, 0.20f);
         if (he.Y > 0.16f)
         {
-            // Glass greenhouse, oriented to the real front (+X): slanted windshield, rear window, side glass.
+            // Glass greenhouse, oriented to the real front (+X). Panels sit PROUD of the cabin
+            // surfaces — the previous version was buried inside the cabin box and invisible.
             void Glass(Matrix4x4 m) { GL.UniformMatrix4(_uModel, ToArray(m * localToWorld)); _cubeMesh.Draw(); }
-            // front windshield: thin slab at the front, top leaning back
-            Glass(Matrix4x4.CreateScale(he.X * 0.10f, he.Y * 0.55f, he.Z * 0.84f)
-                * Matrix4x4.CreateFromAxisAngle(Vector3.UnitZ, 0.55f)
-                * Matrix4x4.CreateTranslation(he.X * 0.70f, he.Y * 0.28f, 0f));
+            // front windshield: wide slanted panel over the front-top, leaning back
+            Glass(Matrix4x4.CreateScale(he.X * 0.50f, he.Y * 0.09f, he.Z * 0.86f)
+                * Matrix4x4.CreateFromAxisAngle(Vector3.UnitZ, -0.85f)
+                * Matrix4x4.CreateTranslation(he.X * 0.58f, he.Y * 0.92f, 0f));
             // rear window: opposite slant
-            Glass(Matrix4x4.CreateScale(he.X * 0.10f, he.Y * 0.50f, he.Z * 0.82f)
-                * Matrix4x4.CreateFromAxisAngle(Vector3.UnitZ, -0.50f)
-                * Matrix4x4.CreateTranslation(-he.X * 0.74f, he.Y * 0.28f, 0f));
-            // side windows
-            foreach (float sz in new[] { -he.Z * 1.01f, he.Z * 1.01f })
-                Glass(Matrix4x4.CreateScale(he.X * 0.62f, he.Y * 0.40f, he.Z * 0.05f)
-                    * Matrix4x4.CreateTranslation(0f, he.Y * 0.26f, sz));
+            Glass(Matrix4x4.CreateScale(he.X * 0.42f, he.Y * 0.09f, he.Z * 0.82f)
+                * Matrix4x4.CreateFromAxisAngle(Vector3.UnitZ, 0.95f)
+                * Matrix4x4.CreateTranslation(-he.X * 0.62f, he.Y * 0.92f, 0f));
+            // side windows: dark panels proud of each side
+            foreach (float sz in new[] { -he.Z * 1.02f, he.Z * 1.02f })
+                Glass(Matrix4x4.CreateScale(he.X * 0.74f, he.Y * 0.42f, he.Z * 0.04f)
+                    * Matrix4x4.CreateTranslation(0f, he.Y * 0.50f, sz));
 
             // variant roof details
             string? vtag = b.Tag as string;
@@ -6087,15 +6159,53 @@ internal sealed partial class GlPanel : Control
     // Wheels are spheres on point joints, so friction/impacts can spin them about any axis.
     // Lock each wheel's spin to its axle (world Z for an axis-aligned vehicle/cart) so they roll
     // like real wheels instead of tumbling. (Assumes the rig is spawned axis-aligned, which it is.)
+    private readonly Dictionary<RigidBody, Vector3> _wheelAxles = new();
+
     private void LockWheelAxes()
     {
+        _wheelAxles.Clear();
         foreach (var b in _world.Bodies)
         {
             if (b.IsStatic) continue;
             if (!IsVehicleWheel(b) && !IsCartWheel(b)) continue;
-            float spin = b.AngularVelocity.Z;   // project onto the Z axle
-            b.AngularVelocity = new Vector3(0f, 0f, spin);
+
+            // Find the chassis this wheel is jointed to and the wheel's mounting offset in chassis space.
+            RigidBody? chassis = null;
+            Vector3 offset = Vector3.Zero;
+            foreach (var j in _world.Joints)
+            {
+                if (j.A == b && j.B != null && IsChassis(j.B)) { chassis = j.B; offset = j.LocalB; break; }
+                if (j.B == b && IsChassis(j.A)) { chassis = j.A; offset = j.LocalA; break; }
+            }
+
+            // The axle is the chassis-local lateral axis (track is narrower than the wheelbase), rotated
+            // into world space so it turns with the chassis. World-Z was wrong once the cart/car turned.
+            Vector3 axle;
+            if (chassis != null)
+            {
+                Vector3 localAxle = MathF.Abs(offset.X) <= MathF.Abs(offset.Z) ? Vector3.UnitX : Vector3.UnitZ;
+                axle = Vector3.Transform(localAxle, chassis.Rotation);
+                if (axle.LengthSquared() > 1e-8f) axle = Vector3.Normalize(axle); else axle = Vector3.UnitZ;
+            }
+            else axle = Vector3.UnitZ;
+
+            _wheelAxles[b] = axle;
+            float spin = Vector3.Dot(b.AngularVelocity, axle);   // keep only rolling about the axle
+            b.AngularVelocity = axle * spin;
         }
+    }
+
+    private static bool IsChassis(RigidBody b) => IsVehicleChassis(b) || IsWoodenCart(b);
+
+    /// <summary>Rotation taking the local +Y axis onto the given (unit) direction.</summary>
+    private static Quaternion AlignYTo(Vector3 dir)
+    {
+        var axis = Vector3.Cross(Vector3.UnitY, dir);
+        float len = axis.Length();
+        if (len < 1e-5f) return dir.Y >= 0f ? Quaternion.Identity : Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI);
+        axis /= len;
+        float ang = MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.UnitY, dir), -1f, 1f));
+        return Quaternion.CreateFromAxisAngle(axis, ang);
     }
 
     /// <summary>Draw an explosive barrel as a proper upright cylinder (its physics body is a capsule).</summary>
@@ -6118,11 +6228,28 @@ internal sealed partial class GlPanel : Control
     {
         float r = child.Radius;
         float halfWidth = r * 0.55f;
-        var m = Matrix4x4.CreateScale(r, halfWidth, r)
-              * Matrix4x4.CreateRotationX(MathF.PI * 0.5f)              // axis Y -> Z (axle)
+        var pos = b.Position + Vector3.Transform(child.LocalPos, b.Rotation);
+
+        // Mount the disc on the wheel's true axle (the chassis lateral axis, recomputed each frame in
+        // LockWheelAxes) so it stays parallel to the vehicle through turns, rather than following the
+        // wheel body's unconstrained drift. Rolling spin is the wheel's rotation twisted about that axle.
+        if (_wheelAxles.TryGetValue(b, out var axle))
+        {
+            float spin = 2f * MathF.Atan2(b.Rotation.X * axle.X + b.Rotation.Y * axle.Y + b.Rotation.Z * axle.Z, b.Rotation.W);
+            var m = Matrix4x4.CreateScale(r, halfWidth, r)
+                  * Matrix4x4.CreateFromQuaternion(AlignYTo(axle))     // local Y (disc axis) -> axle
+                  * Matrix4x4.CreateFromAxisAngle(axle, spin)          // rolling spin about the axle
+                  * Matrix4x4.CreateTranslation(pos);
+            GL.UniformMatrix4(_uModel, ToArray(m));
+            _cylinderMesh.Draw();
+            return;
+        }
+
+        var fallback = Matrix4x4.CreateScale(r, halfWidth, r)
+              * Matrix4x4.CreateRotationX(MathF.PI * 0.5f)
               * Matrix4x4.CreateFromQuaternion(b.Rotation)
-              * Matrix4x4.CreateTranslation(b.Position + Vector3.Transform(child.LocalPos, b.Rotation));
-        GL.UniformMatrix4(_uModel, ToArray(m));
+              * Matrix4x4.CreateTranslation(pos);
+        GL.UniformMatrix4(_uModel, ToArray(fallback));
         _cylinderMesh.Draw();
     }
 

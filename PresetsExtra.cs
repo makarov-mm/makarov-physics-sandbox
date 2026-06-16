@@ -33,7 +33,9 @@ internal sealed partial class GlPanel
 
         for (int i = 0; i < 8; i++)
         {
-            RigidBody barrel = WithMaterial(MakeBreakable(RigidBody.CreateBox(new Vector3(-5.6f + i * 1.45f, 0.5f, 0f), new Vector3(0.3f, 0.5f, 0.3f), density: 1.0f), threshold: 2.4f), MaterialId.Explosive);
+            RigidBody barrel = WithMaterial(RigidBody.CreateBox(new Vector3(-5.6f + i * 1.45f, 0.5f, 0f), new Vector3(0.3f, 0.5f, 0.3f), density: 1.0f), MaterialId.Explosive);
+            barrel.Tag = "ExplosiveBarrel";
+            barrel.ExplosivePower = 1.6f;
             AddBody(barrel, barrel.Color);
             first ??= barrel;
         }
@@ -64,8 +66,10 @@ internal sealed partial class GlPanel
                 float x = 4.2f + (i - (count - 1) * 0.5f) * 0.95f;
 
                 RigidBody barrel = WithMaterial(
-                    MakeBreakable(RigidBody.CreateBox(new Vector3(x, y, 0f), new Vector3(0.32f, 0.45f, 0.32f), density: 1.0f), threshold: 2.5f),
+                    RigidBody.CreateBox(new Vector3(x, y, 0f), new Vector3(0.32f, 0.45f, 0.32f), density: 1.0f),
                     MaterialId.Explosive);
+                barrel.Tag = "ExplosiveBarrel";
+                barrel.ExplosivePower = 1.6f;
                 AddBody(barrel, barrel.Color);
             }
         }
