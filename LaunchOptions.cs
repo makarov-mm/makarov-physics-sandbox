@@ -10,7 +10,7 @@ public sealed class LaunchOptions
 
     public static LaunchOptions Parse(string[] args)
     {
-        bool play = false;
+        bool play = true;   // default: boot straight into PlayMode (the shipped experience); pass --editor to get the editor
         bool? start = null;
         string? preset = null;
 
@@ -21,6 +21,10 @@ public sealed class LaunchOptions
                 arg.Equals("--fullscreen", StringComparison.OrdinalIgnoreCase))
             {
                 play = true;
+            }
+            else if (arg.Equals("--editor", StringComparison.OrdinalIgnoreCase))
+            {
+                play = false;   // dev opt-out: launch into the editor instead of PlayMode
             }
             else if (arg.Equals("--start", StringComparison.OrdinalIgnoreCase) ||
                      arg.Equals("--title", StringComparison.OrdinalIgnoreCase))
@@ -44,7 +48,7 @@ public sealed class LaunchOptions
         return new LaunchOptions
         {
             PlayMode = play,
-            ShowStartScreen = start ?? play,
+            ShowStartScreen = start ?? false,   // the PlayMode menu is the start screen; editor overlay only on explicit --start
             Preset = string.IsNullOrWhiteSpace(preset) ? null : preset,
         };
     }

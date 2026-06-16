@@ -25,6 +25,8 @@ namespace MakarovPhysicsSandbox
         private FlowLayoutPanel _playerTopBarList = null!;
         private Button? _topPauseButton;
         private Button? _topSlowMoButton;
+        private Panel _playerPresetPanel = null!;
+        private FlowLayoutPanel _playerPresetList = null!;
         private Panel _playMenu = null!;
         private FlowLayoutPanel _playerControlList = null!;
         private Label _playerControlsTitle = null!;
@@ -79,7 +81,7 @@ namespace MakarovPhysicsSandbox
 
         private void BuildUi()
         {
-            Text = "Makarov Physics Sandbox";
+            Text = "Wrecksmith";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(1180, 760);
             WindowState = FormWindowState.Maximized;
@@ -155,6 +157,7 @@ namespace MakarovPhysicsSandbox
             Controls.Add(_hudTop);
             Controls.Add(_playerControls);
             Controls.Add(_playerTopBar);
+            Controls.Add(_playerPresetPanel);
             Controls.Add(_startOverlay);
             Controls.Add(_playMenu);
             Controls.Add(_resultOverlay);
@@ -162,6 +165,7 @@ namespace MakarovPhysicsSandbox
             _hudBottom.BringToFront();
             _playerControls.BringToFront();
             _playerTopBar.BringToFront();
+            _playerPresetPanel.BringToFront();
             _startOverlay.BringToFront();
             _playMenu.BringToFront();
             _resultOverlay.BringToFront();
@@ -174,7 +178,7 @@ namespace MakarovPhysicsSandbox
             SetResultOverlayVisible(false);
 
             Shown += (_, _) => BeginInitialLaunchMode();
-            Resize += (_, _) => { LayoutFullscreenHud(); LayoutPlayerTopBar(); LayoutPlayerControls(); LayoutStartScreen(); LayoutPlayMenu(); LayoutResultOverlay(); };
+            Resize += (_, _) => { LayoutFullscreenHud(); LayoutPlayerTopBar(); LayoutPlayerControls(); LayoutPlayerPresetPanel(); LayoutStartScreen(); LayoutPlayMenu(); LayoutResultOverlay(); };
             LayoutFullscreenHud();
             LayoutPlayerControls();
             LayoutStartScreen();
@@ -189,7 +193,7 @@ namespace MakarovPhysicsSandbox
             {
                 if (_playMenu?.Visible == true)
                 {
-                    if (MessageBox.Show(this, "Exit Makarov Physics Sandbox?", "Exit",
+                    if (MessageBox.Show(this, "Exit Wrecksmith?", "Exit",
                             MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                         Close();
                 }
@@ -308,7 +312,7 @@ namespace MakarovPhysicsSandbox
                 AutoSize = false,
                 Dock = DockStyle.Top,
                 Height = 44,
-                Text = "MAKAROV PHYSICS SANDBOX",
+                Text = "WRECKSMITH",
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI Semibold", 18F, FontStyle.Bold),
                 ForeColor = Color.WhiteSmoke,
@@ -383,7 +387,7 @@ namespace MakarovPhysicsSandbox
                 AutoSize = false,
                 Dock = DockStyle.Top,
                 Height = 66,
-                Text = "MAKAROV PHYSICS SANDBOX",   // swap for the final game name once decided
+                Text = "WRECKSMITH",
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI Semibold", 22F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(245, 246, 248),
@@ -658,7 +662,7 @@ namespace MakarovPhysicsSandbox
                 AutoSize = false,
                 Dock = DockStyle.Top,
                 Height = 22,
-                Text = "MAKAROV PHYSICS SANDBOX — PLAY MODE",
+                Text = "WRECKSMITH — PLAY MODE",
                 Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
                 ForeColor = Color.WhiteSmoke,
             };
@@ -784,7 +788,6 @@ namespace MakarovPhysicsSandbox
             };
 
             AddPlayerButton("Object", "catalog.png", "F6", ShowSpawnCatalog);
-            AddPlayerButton("Presets", "presets.png", "", ShowPresets);
             AddPlayerButton("Explosion", "explosion.png", "E", () => _gl.Detonate());
             AddPlayerButton("Shoot", "shoot.png", "F", () => _gl.Shoot());
             AddPlayerButton("Barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel());
@@ -818,9 +821,82 @@ namespace MakarovPhysicsSandbox
             AddPlayerButton("Door", "door.png", "", () => _gl.SpawnSlidingDoor());
 
             BuildPlayerTopBar();
+            BuildPlayerPresetPanel();
 
             _playerControls.Controls.Add(_playerControlList);
             _playerControls.Controls.Add(_playerControlsTitle);
+        }
+
+        // Dedicated presets panel on the right edge of the play view, kept separate from the
+        // spawn/tool buttons on the left so players don't hunt for ready-made scenes among the tools.
+        private void BuildPlayerPresetPanel()
+        {
+            _playerPresetPanel = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(230, 18, 22, 30),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(8),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom,
+                Width = 236,
+            };
+            var title = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                Text = "PRESETS",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Semibold", 10F, FontStyle.Bold),
+                ForeColor = Color.WhiteSmoke,
+            };
+            _playerPresetList = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(2),
+            };
+
+            foreach (var name in new[]
+            {
+                "Domino Run", "Tower Collapse", "Bridge Jump", "Catapult Bridge Siege", "Drone Target Range",
+                "Newton Cradle", "Zero-G Chaos", "Water Playground", "Android Fire Lab", "Electrical Chain Lab",
+                "Vehicle Crash Test", "Mechanism Chain Reaction", "Conveyor Chain Lab", "Piston Crusher Lab",
+                "Explosive Domino", "Barrel Pyramid", "Wrecking Ball", "Ragdoll Bowling",
+            }) AddPresetButton(name);
+
+            _playerPresetPanel.Controls.Add(_playerPresetList);
+            _playerPresetPanel.Controls.Add(title);
+        }
+
+        private void AddPresetButton(string name)
+        {
+            var b = new Button
+            {
+                Text = name,
+                Width = 210,
+                Height = 36,
+                Margin = new Padding(2),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(8, 0, 0, 0),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(38, 45, 56),
+                ForeColor = Color.WhiteSmoke,
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Bold),
+                UseVisualStyleBackColor = false,
+            };
+            b.FlatAppearance.BorderColor = Color.FromArgb(72, 86, 104);
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(52, 62, 76);
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(30, 36, 46);
+            b.Click += (_, _) =>
+            {
+                _gl.LoadPreset(name);
+                _status.Text = $"Preset loaded: {name}";
+                UpdateToolbarState();
+                _gl.Focus();
+            };
+            _playerPresetList.Controls.Add(b);
         }
 
         // The top bar holds session/program controls (menu, pause, reset...) kept apart from the
@@ -968,17 +1044,33 @@ namespace MakarovPhysicsSandbox
             _playerControls.Height = Math.Max(260, bottom - top);
         }
 
+        private void LayoutPlayerPresetPanel()
+        {
+            if (_playerPresetPanel == null) return;
+            int margin = 16;
+            int top = (_playerTopBar != null && _playerTopBar.Visible) ? _playerTopBar.Bottom + 12
+                    : (_hudTop != null && _hudTop.Visible) ? _hudTop.Bottom + 12 : margin;
+            int bottom = (_hudBottom != null && _hudBottom.Visible) ? ClientSize.Height - _hudBottom.Height - margin * 2 : ClientSize.Height - margin;
+            _playerPresetPanel.Width = 236;
+            _playerPresetPanel.Left = ClientSize.Width - _playerPresetPanel.Width - margin;
+            _playerPresetPanel.Top = top;
+            _playerPresetPanel.Height = Math.Max(260, bottom - top);
+        }
+
         private void SetPlayerControlsVisible(bool visible)
         {
             if (_playerControls == null) return;
             _playerControls.Visible = visible;
             if (_playerTopBar != null) _playerTopBar.Visible = visible;
+            if (_playerPresetPanel != null) _playerPresetPanel.Visible = visible;
             if (visible)
             {
                 LayoutPlayerTopBar();
                 LayoutPlayerControls();
+                LayoutPlayerPresetPanel();
                 _playerTopBar?.BringToFront();
                 _playerControls.BringToFront();
+                _playerPresetPanel?.BringToFront();
             }
         }
 
@@ -1559,7 +1651,7 @@ namespace MakarovPhysicsSandbox
             using var dialog = new SaveFileDialog
             {
                 Title = "Save scene",
-                Filter = "Makarov Physics Sandbox scene (*.mpscene)|*.mpscene|JSON files (*.json)|*.json|All files (*.*)|*.*",
+                Filter = "Wrecksmith scene (*.mpscene)|*.mpscene|JSON files (*.json)|*.json|All files (*.*)|*.*",
                 DefaultExt = "mpscene",
                 AddExtension = true,
                 FileName = "sandbox-scene.mpscene",
@@ -1584,7 +1676,7 @@ namespace MakarovPhysicsSandbox
             using var dialog = new OpenFileDialog
             {
                 Title = "Load scene",
-                Filter = "Makarov Physics Sandbox scene (*.mpscene)|*.mpscene|JSON files (*.json)|*.json|All files (*.*)|*.*",
+                Filter = "Wrecksmith scene (*.mpscene)|*.mpscene|JSON files (*.json)|*.json|All files (*.*)|*.*",
                 DefaultExt = "mpscene",
                 CheckFileExists = true,
             };
@@ -1706,6 +1798,7 @@ namespace MakarovPhysicsSandbox
             LayoutFullscreenHud();
             LayoutPlayerTopBar();
             LayoutPlayerControls();
+            LayoutPlayerPresetPanel();
             LayoutStartScreen();
             LayoutPlayMenu();
             if (_startOverlay?.Visible == true) ShowStartScreen();
