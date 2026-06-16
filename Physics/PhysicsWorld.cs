@@ -87,6 +87,17 @@ internal sealed class PhysicsWorld
             _accumulator -= FixedStep;
         }
         if (steps >= 8) _accumulator = 0f; // can't keep up - drop time instead of spiraling
+
+        // Age out fracture debris so it doesn't accumulate and keep jittering/clattering forever.
+        List<RigidBody>? expired = null;
+        foreach (var b in Bodies)
+        {
+            if (b.DebrisLife < 0f) continue;
+            b.DebrisLife -= dt;
+            if (b.DebrisLife <= 0f) (expired ??= new List<RigidBody>()).Add(b);
+        }
+        if (expired != null)
+            foreach (var b in expired) RemoveBody(b);
     }
 
     private void SubStep(float h)
@@ -238,6 +249,12 @@ internal sealed class PhysicsWorld
             toBreak[b] = (impactSpeed, point, normal);
     }
 
+    // Force a breakable body to fracture now (used by explosions, which otherwise only shove bodies).
+    public void FractureBody(RigidBody b, Vector3 point, Vector3 normal, float impactSpeed)
+    {
+        if (b.Breakable && b.BoundingRadius >= 0.16f) BreakBody(b, point, normal, impactSpeed);
+    }
+
     private void BreakBody(RigidBody b, Vector3 hitPoint, Vector3 hitNormal, float impactSpeed)
     {
         if (!Bodies.Contains(b)) return;
@@ -276,6 +293,7 @@ internal sealed class PhysicsWorld
             p.Velocity = originalVel + RandomUnit() * (1.0f + (float)_breakRng.NextDouble() * 2.5f);
             p.AngularVelocity = originalAng + RandomUnit() * (2.0f + (float)_breakRng.NextDouble() * 5.0f);
             p.UserObject = true;
+            p.DebrisLife = 8f + (float)_breakRng.NextDouble() * 4f;   // clear after 8-12s so debris can't pile up forever
             p.Wake();
             Bodies.Add(p);
         }

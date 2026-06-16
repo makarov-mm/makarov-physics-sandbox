@@ -100,7 +100,7 @@ internal sealed partial class GlPanel : Control
     private int _dModel, _dLightVP;
 
     // ---- camera (orbit) ----
-    private float _camYaw = 0.6f, _camPitch = 0.42f, _camDist = 16f;
+    private float _camYaw = 0.6f, _camPitch = 0.42f, _camDist = 26f;
     private readonly Vector3 _camTarget = new(0, 2, 0);
     private Vector3 _camPos;
     private Matrix4x4 _view, _proj;
@@ -208,8 +208,8 @@ internal sealed partial class GlPanel : Control
     private readonly PhysicsWorld _world = new();
     private readonly Random _rng = new(12345);
     private const int MaxBodies = 360;
-    private const float ArenaHalf = 12f;
-    private const float WallHeight = 2.8f;
+    private const float ArenaHalf = 22f;
+    private const float WallHeight = 3.2f;
     // World-space texture tiling for static box surfaces: tiles per world unit (1/tile-size).
     // Brick courses read naturally at ~2 units per tile; tweak if bricks look too big/small.
     private const float WallBrickDensity = 0.45f;
@@ -1064,7 +1064,8 @@ internal sealed partial class GlPanel : Control
 
         AddHammer(new Vector3(-3.5f, 3f, 2.5f), 1f, Quaternion.CreateFromYawPitchRoll(0.7f, 0.9f, 0f), Palette[6 % Palette.Length]);
 
-        var table = MakeTable(new Vector3(0f, 1.2f, -3f));
+        var table = WithMaterial(MakeTable(new Vector3(0f, 1.2f, -3f)), MaterialId.Wood);
+        table.Breakable = true; table.BreakThreshold = 6.0f; table.BreakPieces = 10;
         table.Color = Palette[3];
         _world.Bodies.Add(table);
 
@@ -1099,6 +1100,100 @@ internal sealed partial class GlPanel : Control
                 prev = link;
             }
         }
+
+        // --- expanded sandbox: more structures spread across the larger arena ---
+        RigidBody Crate(Vector3 pos, float half)
+        {
+            var b = WithMaterial(RigidBody.CreateBox(pos, new Vector3(half), density: 0.7f), MaterialId.Wood);
+            b.Breakable = true; b.BreakThreshold = 5.0f; b.BreakPieces = 8; b.Color = Vector3.One;
+            _world.Bodies.Add(b);
+            return b;
+        }
+        void Barrel(Vector3 pos)
+        {
+            var bar = WithMaterial(RigidBody.CreateBox(pos, new Vector3(0.36f, 0.62f, 0.36f), density: 1.05f), MaterialId.Explosive);
+            bar.Tag = "ExplosiveBarrel"; bar.Color = Vector3.One;
+            bar.ExplosivePower = 1.8f; bar.Flammability = 1.0f; bar.Conductivity = 0.35f;
+            bar.Restitution = 0.18f; bar.Friction = 0.55f;
+            _world.Bodies.Add(bar);
+        }
+        void Dummy(Vector3 at)
+        {
+            var d = WithMaterial(RigidBody.CreateCompound(at + new Vector3(0, 0.46f, 0), [
+                ChildShape.Sphere(0.42f, new Vector3(0f, -0.10f, 0f)),
+                ChildShape.Sphere(0.30f, new Vector3(0f,  0.42f, 0f)),
+                ChildShape.Sphere(0.20f, new Vector3(0f,  0.86f, 0f)),
+            ], density: 1.15f), MaterialId.Synthetic);
+            d.Tag = "SentinelBot"; d.Color = new Vector3(0.92f, 0.30f, 0.26f);
+            d.Restitution = 0.22f; d.Friction = 0.62f;
+            d.Breakable = true; d.BreakThreshold = 6.0f; d.BreakPieces = 10;
+            _world.Bodies.Add(d);
+        }
+
+        // extra towers in the far quadrants
+        AddBrickTower(new Vector3(13f, 0f, -12f), levels: 6, perRow: 4, bw: 0.45f);
+        AddPyramidTower(new Vector3(-13f, 0f, -12f), levels: 5, bw: 0.5f);
+        AddBrickTower(new Vector3(15f, 0f, 9f), levels: 5, perRow: 3, bw: 0.5f);
+
+        // a pyramid of breakable wooden crates
+        for (int level = 0; level < 4; level++)
+            for (int i = 0; i < 4 - level; i++)
+                Crate(new Vector3(-15f + (i + level * 0.5f) * 1.1f, 0.55f + level * 1.05f, 9f), 0.5f);
+
+        // an explosive chain: barrels with crates stacked on top
+        for (int i = 0; i < 4; i++) Barrel(new Vector3(7f + i * 1.0f, 0.62f, 13f));
+        for (int i = 0; i < 3; i++) Crate(new Vector3(7.5f + i * 1.0f, 1.7f, 13f), 0.42f);
+
+        // a bridge to drive across or knock things off
+        AddBridgeSpan(new Vector3(0f, 0f, 17f), length: 9f, width: 2.6f, plankCount: 12, withCargo: false);
+
+        // wobble target dummies
+        Dummy(new Vector3(4f, 0f, -15f));
+        Dummy(new Vector3(-4f, 0f, -15f));
+        Dummy(new Vector3(0f, 0f, -16.5f));
+
+        // a 10-pin set with a heavy ball lined up to roll at it
+        for (int row = 0; row < 4; row++)
+            for (int k = 0; k <= row; k++)
+            {
+                var pp = new Vector3(16f + row * 0.48f, 0.52f, (k - row * 0.5f) * 0.55f);
+                var pin = WithMaterial(RigidBody.CreateCapsule(pp, 0.17f, density: 0.75f), MaterialId.Plastic);
+                pin.Tag = "BowlingPin"; pin.Color = Vector3.One; pin.Friction = 0.44f; pin.Restitution = 0.22f;
+                _world.Bodies.Add(pin);
+            }
+        var ball = WithMaterial(RigidBody.CreateSphere(new Vector3(11f, 0.6f, 0f), 0.6f, density: 4f), MaterialId.Metal);
+        ball.Color = Vector3.One;
+        _world.Bodies.Add(ball);
+
+        // a ramp with a sphere ready to roll down
+        var ramp = RigidBody.CreateStaticBox(new Vector3(-16f, 0.9f, 2f), new Vector3(2.4f, 0.15f, 2.0f));
+        ramp.Rotation = Quaternion.CreateFromYawPitchRoll(0f, 0f, -0.33f);
+        ramp.UpdateDerived();
+        ramp.Color = new Vector3(0.40f, 0.42f, 0.46f);
+        _world.Bodies.Add(ramp);
+        var roller = RigidBody.CreateSphere(new Vector3(-17.4f, 2.4f, 2f), 0.5f);
+        roller.Color = Palette[3];
+        _world.Bodies.Add(roller);
+
+        // scattered heavy props
+        var db2 = MakeDumbbell(new Vector3(-9f, 1.4f, 14f)); db2.Color = Palette[1]; _world.Bodies.Add(db2);
+        AddHammer(new Vector3(9f, 1.2f, -13f), 1f, Quaternion.CreateFromYawPitchRoll(0.4f, 0f, 0f), Palette[6 % Palette.Length]);
+        var table2 = WithMaterial(MakeTable(new Vector3(-9f, 1.2f, -6f)), MaterialId.Wood);
+        table2.Breakable = true; table2.BreakThreshold = 6.0f; table2.Color = Palette[3];
+        _world.Bodies.Add(table2);
+
+        // a loose scatter of mixed shapes in a far corner
+        for (int i = 0; i < 10; i++)
+        {
+            var at = new Vector3(-18f + (float)_rng.NextDouble() * 5f, 0.6f + i * 0.2f, 15f + (float)_rng.NextDouble() * 4f);
+            if (i % 2 == 0) Crate(at, 0.35f + (float)_rng.NextDouble() * 0.2f);
+            else { var s = RigidBody.CreateSphere(at, 0.3f + (float)_rng.NextDouble() * 0.25f); s.Color = Palette[i % Palette.Length]; _world.Bodies.Add(s); }
+        }
+
+        // a few standing barrels dotted around for chain reactions
+        Barrel(new Vector3(-2f, 0.62f, 11f));
+        Barrel(new Vector3(2f, 0.62f, -11f));
+        Barrel(new Vector3(18f, 0.62f, -6f));
     }
 
     // --- tower builders (used by the default scene) ---
@@ -2247,7 +2342,7 @@ internal sealed partial class GlPanel : Control
             case 7:
             {
                 float hk = 0.9f + J() * 0.4f;
-                AddHammer(At(0.55f * hk), hk, Quaternion.CreateFromAxisAngle(Vector3.UnitY, J() * MathF.Tau), Vector3.One);
+                AddHammer(At(0.2f * hk), hk, Quaternion.CreateFromAxisAngle(Vector3.UnitY, J() * MathF.Tau), Vector3.One);
                 return;   // AddHammer adds both bodies and their joints itself
             }
             case 8: body = WithMaterial(MakeTable(At(0.55f), 0.9f + J() * 0.3f), MaterialId.Wood); break;
@@ -2294,13 +2389,13 @@ internal sealed partial class GlPanel : Control
         var headHalf = new Vector3(0.12f * k, 0.17f * k, 0.26f * k);
         var headOffset = new Vector3(0.36f * k, 0f, 0f);
 
-        var handle = WithMaterial(RigidBody.CreateBox(pos, handleHalf, density: 0.7f), MaterialId.Wood);
+        var handle = WithMaterial(RigidBody.CreateBox(pos, handleHalf, density: 1.2f), MaterialId.Wood);
         handle.Rotation = rot; handle.UpdateDerived();
         handle.Tag = "Hammer"; handle.Color = color;
-        handle.Breakable = true; handle.BreakThreshold = 4.5f; handle.BreakPieces = 8;
+        handle.Breakable = true; handle.BreakThreshold = 7.0f; handle.BreakPieces = 8;
         _world.Bodies.Add(handle);
 
-        var head = WithMaterial(RigidBody.CreateBox(pos + Vector3.Transform(headOffset, rot), headHalf, density: 4.0f), MaterialId.Metal);
+        var head = WithMaterial(RigidBody.CreateBox(pos + Vector3.Transform(headOffset, rot), headHalf, density: 2.4f), MaterialId.Metal);
         head.Rotation = rot; head.UpdateDerived();
         head.Tag = "Hammer"; head.Color = color;
         head.Breakable = false;
@@ -2736,6 +2831,11 @@ internal sealed partial class GlPanel : Control
         chassis.Tag = "VehicleChassis";
         chassis.Friction = 0.55f;
         chassis.Restitution = 0.12f;
+        // Collision-tough (high threshold so resting wheels never fracture it) but still breakable by a
+        // close explosion via the blast's direct-fracture path.
+        chassis.Breakable = true;
+        chassis.BreakThreshold = 14f;
+        chassis.BreakPieces = 10;
         // Keep the vehicle readable by default. Later vehicle-damage work can detach/break parts deliberately;
         // the previous version could fracture immediately because wheels overlapped the chassis.
         chassis.Breakable = false;
@@ -3322,6 +3422,26 @@ internal sealed partial class GlPanel : Control
     {
         _world.ApplyExplosion(center, radius, strength);
         _ragdolls.DamageInRadius(center, radius, strength * 10.0f, _world);
+
+        // Directly shatter breakable bodies caught in the blast, so explosions destroy crates, tables,
+        // ice, cars, etc. instead of only shoving them. Collect first, then break (mutates the lists).
+        List<RigidBody>? frac = null;
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic || !b.Breakable || b == _world.Grabbed) continue;
+            float d = Vector3.Distance(b.Position, center);
+            if (d > radius) continue;
+            float effect = strength * (1f - d / radius);     // stronger closer to the centre
+            if (effect >= MathF.Min(4f, b.BreakThreshold * 0.5f)) (frac ??= new List<RigidBody>()).Add(b);
+        }
+        if (frac != null)
+            foreach (var b in frac)
+            {
+                var n = b.Position - center;
+                n = n.LengthSquared() > 1e-6f ? Vector3.Normalize(n) : Vector3.UnitY;
+                _world.FractureBody(b, b.Position, n, b.BreakThreshold + 4f);
+            }
+
         SpawnExplosionFeedback(center, radius);
         PlayExplosionSound();
         foreach (var b in _world.Bodies) b.Wake();
@@ -3341,7 +3461,7 @@ internal sealed partial class GlPanel : Control
 
             bool hot = b.Burning || b.Temperature > 230f;
             bool shocked = b.Charge > 0.72f;
-            bool hardHit = b.Velocity.LengthSquared() > 40f;
+            bool hardHit = b != _world.Grabbed && b.Velocity.LengthSquared() > 70f;
             if (hot || shocked || hardHit) (detonate ??= new List<RigidBody>()).Add(b);
         }
 
@@ -3424,7 +3544,7 @@ internal sealed partial class GlPanel : Control
                     false);
             }
         }
-        if (loudestImpact >= 3.5f) PlayImpactSound(loudestImpact);
+        if (loudestImpact >= 4.5f) PlayImpactSound(loudestImpact);
 
         SpawnWaterSplashEffects();
 
@@ -4372,7 +4492,7 @@ internal sealed partial class GlPanel : Control
     private void UpdateCamera()
     {
         _camPitch = Math.Clamp(_camPitch, 0.05f, 1.45f);
-        _camDist = Math.Clamp(_camDist, 4f, 45f);
+        _camDist = Math.Clamp(_camDist, 4f, 75f);
 
         float cp = MathF.Cos(_camPitch), sp = MathF.Sin(_camPitch);
         // cinematic weight: 1 at the moment of the blast, easing to 0
@@ -4699,9 +4819,9 @@ internal sealed partial class GlPanel : Control
         // floor
         GL.BindTexture(GL.TEXTURE_2D, _texFloor);
         GL.Uniform1(_uWorldUv, 0f);
-        GL.Uniform1(_uUvScale, 20f);
+        GL.Uniform1(_uUvScale, 32f);
         GL.Uniform3(_uColor, 0.62f, 0.64f, 0.68f);
-        GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(40f, 1f, 40f)));
+        GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(64f, 1f, 64f)));
         _planeMesh.Draw();
         GL.Uniform1(_uWaterWaveAmp, 0f);
 

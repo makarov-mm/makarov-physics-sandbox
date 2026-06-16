@@ -57,6 +57,7 @@ public sealed class RigidBody
 
     public bool Sleeping;
     public float SleepTimer;
+    public float DebrisLife = -1f;   // >= 0 for fracture debris: seconds left before it is removed
     public bool Touching;   // set each substep if this body had a contact - used for rolling resistance
     public float RippleCooldown; // small per-body timer so a bobbing body doesn't spam water ripples
 

@@ -21,6 +21,11 @@ namespace MakarovPhysicsSandbox
         private Label _hudHotbar = null!;
         private Label _hudHints = null!;
         private Panel _playerControls = null!;
+        private Panel _playerTopBar = null!;
+        private FlowLayoutPanel _playerTopBarList = null!;
+        private Button? _topPauseButton;
+        private Button? _topSlowMoButton;
+        private Panel _playMenu = null!;
         private FlowLayoutPanel _playerControlList = null!;
         private Label _playerControlsTitle = null!;
         private bool _propertyTabsVisibleBeforeFullscreen = true;
@@ -133,6 +138,7 @@ namespace MakarovPhysicsSandbox
             BuildFullscreenHud();
             BuildPlayerControls();
             BuildStartScreen();
+            BuildPlayMenu();
             BuildResultOverlay();
             _catalogContext = BuildSpawnCatalogContext();
             _presetContext = BuildPresetContext();
@@ -148,22 +154,27 @@ namespace MakarovPhysicsSandbox
             Controls.Add(_hudBottom);
             Controls.Add(_hudTop);
             Controls.Add(_playerControls);
+            Controls.Add(_playerTopBar);
             Controls.Add(_startOverlay);
+            Controls.Add(_playMenu);
             Controls.Add(_resultOverlay);
             _hudTop.BringToFront();
             _hudBottom.BringToFront();
             _playerControls.BringToFront();
+            _playerTopBar.BringToFront();
             _startOverlay.BringToFront();
+            _playMenu.BringToFront();
             _resultOverlay.BringToFront();
             MainMenuStrip = _menu;
             ApplyPolishedTheme(_menu, _tools, _statusStrip);
             SetFullscreenHudVisible(false);
             SetPlayerControlsVisible(false);
             SetStartOverlayVisible(false);
+            SetPlayMenuVisible(false);
             SetResultOverlayVisible(false);
 
             Shown += (_, _) => BeginInitialLaunchMode();
-            Resize += (_, _) => { LayoutFullscreenHud(); LayoutPlayerControls(); LayoutStartScreen(); LayoutResultOverlay(); };
+            Resize += (_, _) => { LayoutFullscreenHud(); LayoutPlayerTopBar(); LayoutPlayerControls(); LayoutStartScreen(); LayoutPlayMenu(); LayoutResultOverlay(); };
             LayoutFullscreenHud();
             LayoutPlayerControls();
             LayoutStartScreen();
@@ -174,6 +185,25 @@ namespace MakarovPhysicsSandbox
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (_isFullscreen && keyData == Keys.Escape)
+            {
+                if (_playMenu?.Visible == true)
+                {
+                    if (MessageBox.Show(this, "Exit Makarov Physics Sandbox?", "Exit",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                        Close();
+                }
+                else if (MessageBox.Show(this, "Return to the main menu? The current sandbox will be reset.",
+                            "Return to menu", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    ShowPlayMenu();
+                }
+                else
+                {
+                    _gl.Focus();
+                }
+                return true;
+            }
             if (_startOverlay?.Visible == true && keyData == Keys.Escape)
             {
                 SetStartOverlayVisible(false);
@@ -334,6 +364,139 @@ namespace MakarovPhysicsSandbox
             _startOverlay.Controls.Add(_startSubtitle);
             _startOverlay.Controls.Add(title);
             _startOverlay.Controls.Add(footer);
+        }
+
+        // Player-facing start screen for play/fullscreen mode (the default Steam front-end):
+        // Enter sandbox / Choose preset / Exit. Distinct from the editor title overlay above.
+        private void BuildPlayMenu()
+        {
+            _playMenu = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(248, 12, 14, 20),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(40, 30, 40, 22),
+            };
+
+            var title = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 66,
+                Text = "MAKAROV PHYSICS SANDBOX",   // swap for the final game name once decided
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Semibold", 22F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(245, 246, 248),
+                BackColor = Color.Transparent,
+            };
+            var accent = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 3,
+                BackColor = Color.FromArgb(226, 96, 52),
+            };
+            var subtitle = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Top,
+                Height = 44,
+                Text = "Build it. Wreck it. Repeat.",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 11.5F),
+                ForeColor = Color.FromArgb(176, 184, 196),
+                BackColor = Color.Transparent,
+            };
+
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(48, 24, 48, 8),
+                BackColor = Color.FromArgb(248, 12, 14, 20),
+            };
+            AddPlayMenuButton(buttons, "Enter sandbox", primary: true, () => EnterSandboxFromMenu(loadSandbox: true));
+            AddPlayMenuButton(buttons, "Choose a preset", primary: false, () => { EnterSandboxFromMenu(loadSandbox: false); ShowPresets(); });
+            AddPlayMenuButton(buttons, "Exit", primary: false, Close);
+
+            var footer = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Bottom,
+                Height = 28,
+                Text = "Alpha build  ·  Esc opens this menu during play",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 9F),
+                ForeColor = Color.FromArgb(120, 130, 142),
+                BackColor = Color.Transparent,
+            };
+
+            _playMenu.Controls.Add(buttons);
+            _playMenu.Controls.Add(footer);
+            _playMenu.Controls.Add(subtitle);
+            _playMenu.Controls.Add(accent);
+            _playMenu.Controls.Add(title);
+        }
+
+        private void AddPlayMenuButton(FlowLayoutPanel parent, string text, bool primary, Action action)
+        {
+            var b = new Button
+            {
+                Text = text,
+                Width = 384,
+                Height = 54,
+                Margin = new Padding(0, 7, 0, 7),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 12F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter,
+                UseVisualStyleBackColor = false,
+                ForeColor = primary ? Color.Black : Color.WhiteSmoke,
+                BackColor = primary ? Color.FromArgb(226, 96, 52) : Color.FromArgb(40, 46, 56),
+            };
+            b.FlatAppearance.BorderColor = primary ? Color.FromArgb(240, 132, 92) : Color.FromArgb(78, 88, 104);
+            b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(238, 120, 78) : Color.FromArgb(54, 62, 76);
+            b.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(198, 78, 40) : Color.FromArgb(32, 38, 48);
+            b.Click += (_, _) => action();
+            parent.Controls.Add(b);
+        }
+
+        private void LayoutPlayMenu()
+        {
+            if (_playMenu == null) return;
+            int w = Math.Min(560, ClientSize.Width - 80);
+            int h = Math.Min(470, ClientSize.Height - 80);
+            _playMenu.Bounds = new Rectangle((ClientSize.Width - w) / 2, (ClientSize.Height - h) / 2, w, h);
+        }
+
+        private void SetPlayMenuVisible(bool visible)
+        {
+            if (_playMenu == null) return;
+            _playMenu.Visible = visible;
+            if (visible)
+            {
+                LayoutPlayMenu();
+                _playMenu.BringToFront();
+            }
+        }
+
+        // Show the play-mode menu and hide the in-play HUD/controls behind it.
+        private void ShowPlayMenu()
+        {
+            SetFullscreenHudVisible(false);
+            SetPlayerControlsVisible(false);
+            SetPlayMenuVisible(true);
+        }
+
+        // Leave the menu and reveal the in-play HUD/controls. Optionally (re)load the sandbox scene.
+        private void EnterSandboxFromMenu(bool loadSandbox)
+        {
+            SetPlayMenuVisible(false);
+            if (loadSandbox) _gl.Reset();
+            SetFullscreenHudVisible(true);
+            SetPlayerControlsVisible(true);
+            UpdateToolbarState();
+            _gl.Focus();
         }
 
         private void AddStartButton(FlowLayoutPanel parent, string text, Action action)
@@ -653,13 +816,100 @@ namespace MakarovPhysicsSandbox
             AddPlayerButton("Conveyor", "conveyor.png", "", () => _gl.SpawnConveyor());
             AddPlayerButton("Piston", "piston.png", "", () => _gl.SpawnPiston());
             AddPlayerButton("Door", "door.png", "", () => _gl.SpawnSlidingDoor());
-            AddPlayerButton("Pause", "pause.png", "P", () => _gl.TogglePause());
-            AddPlayerButton("Slow-mo", "slowmo.png", "T", () => _gl.ToggleSlowMo());
-            AddPlayerButton("Reset", "reset.png", "R", () => _gl.Reset());
-            AddPlayerButton("Editor", "select.png", "F11", ToggleFullscreen);
+
+            BuildPlayerTopBar();
 
             _playerControls.Controls.Add(_playerControlList);
             _playerControls.Controls.Add(_playerControlsTitle);
+        }
+
+        // The top bar holds session/program controls (menu, pause, reset...) kept apart from the
+        // object/tool buttons in the left panel, so players don't hunt for Reset among the spawners.
+        private void BuildPlayerTopBar()
+        {
+            _playerTopBar = new Panel
+            {
+                Visible = false,
+                BackColor = Color.FromArgb(22, 26, 32),
+                Height = 64,
+            };
+            // thin accent rule along the bottom edge for a finished look
+            _playerTopBar.Controls.Add(new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 2,
+                BackColor = Color.FromArgb(226, 96, 52),
+            });
+            _playerTopBarList = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoScroll = false,
+                Padding = new Padding(8, 6, 8, 6),
+                BackColor = Color.FromArgb(22, 26, 32),
+            };
+            _playerTopBar.Controls.Add(_playerTopBarList);
+
+            AddTopBarButton("Menu", "select.png", "Esc", ShowPlayMenu);
+            _topPauseButton = AddTopBarButton("Pause", "pause.png", "P", () => _gl.TogglePause());
+            _topSlowMoButton = AddTopBarButton("Slow-mo", "slowmo.png", "T", () => _gl.ToggleSlowMo());
+            AddTopBarButton("Reset", "reset.png", "R", () => _gl.Reset());
+            AddTopBarButton("Editor", "select.png", "F11", ToggleFullscreen);
+        }
+
+        private Button AddTopBarButton(string text, string icon, string shortcut, Action action)
+        {
+            var b = new Button
+            {
+                Text = string.IsNullOrWhiteSpace(shortcut) ? text : $"{text}  [{shortcut}]",
+                Width = 134,
+                Height = 48,
+                Margin = new Padding(4),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ImageAlign = ContentAlignment.MiddleLeft,
+                TextImageRelation = TextImageRelation.ImageBeforeText,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(44, 52, 64),
+                ForeColor = Color.WhiteSmoke,
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Bold),
+                UseVisualStyleBackColor = false,
+            };
+            var img = LoadIcon(icon);
+            if (img != null) b.Image = new Bitmap(img, new Size(22, 22));
+            b.FlatAppearance.BorderColor = Color.FromArgb(80, 96, 116);
+            b.FlatAppearance.MouseOverBackColor = Color.FromArgb(58, 68, 84);
+            b.FlatAppearance.MouseDownBackColor = Color.FromArgb(34, 40, 50);
+            b.Click += (_, _) =>
+            {
+                action();
+                UpdateToolbarState();
+                _gl.Focus();
+            };
+            _playerTopBarList.Controls.Add(b);
+            return b;
+        }
+
+        // Reflect Pause / Slow-mo state on the top-bar buttons (called from UpdateToolbarState, which
+        // fires on every state change incl. the P/T keyboard shortcuts).
+        private void UpdatePlayerControlState()
+        {
+            if (_gl == null) return;
+            var accent = Color.FromArgb(212, 150, 40);
+            var idle = Color.FromArgb(44, 52, 64);
+            if (_topPauseButton != null)
+            {
+                bool on = _gl.IsPaused;
+                _topPauseButton.BackColor = on ? accent : idle;
+                _topPauseButton.ForeColor = on ? Color.Black : Color.WhiteSmoke;
+                _topPauseButton.Text = on ? "Resume  [P]" : "Pause  [P]";
+            }
+            if (_topSlowMoButton != null)
+            {
+                bool on = _gl.IsSlowMo;
+                _topSlowMoButton.BackColor = on ? accent : idle;
+                _topSlowMoButton.ForeColor = on ? Color.Black : Color.WhiteSmoke;
+            }
         }
 
         private void AddPlayerHeader(string text)
@@ -695,11 +945,23 @@ namespace MakarovPhysicsSandbox
             _playerControlList.Controls.Add(b);
         }
 
+        private void LayoutPlayerTopBar()
+        {
+            if (_playerTopBar == null) return;
+            int margin = 16;
+            int top = (_hudTop != null && _hudTop.Visible) ? _hudTop.Bottom + 8 : margin;
+            _playerTopBar.Left = margin;
+            _playerTopBar.Top = top;
+            _playerTopBar.Width = Math.Max(320, ClientSize.Width - margin * 2);
+            _playerTopBar.Height = 64;
+        }
+
         private void LayoutPlayerControls()
         {
             if (_playerControls == null) return;
             int margin = 16;
-            int top = (_hudTop != null && _hudTop.Visible) ? _hudTop.Bottom + 12 : margin;
+            int top = (_playerTopBar != null && _playerTopBar.Visible) ? _playerTopBar.Bottom + 12
+                    : (_hudTop != null && _hudTop.Visible) ? _hudTop.Bottom + 12 : margin;
             int bottom = (_hudBottom != null && _hudBottom.Visible) ? ClientSize.Height - _hudBottom.Height - margin * 2 : ClientSize.Height - margin;
             _playerControls.Left = margin;
             _playerControls.Top = top;
@@ -710,9 +972,12 @@ namespace MakarovPhysicsSandbox
         {
             if (_playerControls == null) return;
             _playerControls.Visible = visible;
+            if (_playerTopBar != null) _playerTopBar.Visible = visible;
             if (visible)
             {
+                LayoutPlayerTopBar();
                 LayoutPlayerControls();
+                _playerTopBar?.BringToFront();
                 _playerControls.BringToFront();
             }
         }
@@ -1377,6 +1642,7 @@ namespace MakarovPhysicsSandbox
             }
             if (_pauseButton != null) _pauseButton.Checked = _gl.IsPaused;
             if (_slowMoButton != null) _slowMoButton.Checked = _gl.IsSlowMo;
+            UpdatePlayerControlState();
             if (_propertiesButton != null) _propertiesButton.Checked = _propertyTabs?.Visible == true;
             if (_wiringButton != null) _wiringButton.Checked = _gl.ShowTriggerWiring;
 
@@ -1419,8 +1685,7 @@ namespace MakarovPhysicsSandbox
                 _statusStrip.Visible = false;
                 _propertyTabs.Visible = false;
                 _isFullscreen = true;
-                SetFullscreenHudVisible(true);
-                SetPlayerControlsVisible(true);
+                ShowPlayMenu();   // land on the player start screen, not straight into the scene
                 _status.Text = "Fullscreen play view enabled. Player GUI is active; press F11 to return to the editor layout.";
             }
             else
@@ -1433,13 +1698,16 @@ namespace MakarovPhysicsSandbox
                 _statusStrip.Visible = true;
                 _propertyTabs.Visible = _propertyTabsVisibleBeforeFullscreen;
                 _isFullscreen = false;
+                SetPlayMenuVisible(false);
                 SetFullscreenHudVisible(false);
                 SetPlayerControlsVisible(false);
                 _status.Text = "Fullscreen disabled.";
             }
             LayoutFullscreenHud();
+            LayoutPlayerTopBar();
             LayoutPlayerControls();
             LayoutStartScreen();
+            LayoutPlayMenu();
             if (_startOverlay?.Visible == true) ShowStartScreen();
             UpdateToolbarState();
             _gl.Focus();
@@ -1509,7 +1777,7 @@ namespace MakarovPhysicsSandbox
             // While a menu/result overlay is up, stop the busy GL render loop: it otherwise pegs the
             // message pump and the GL surface overdraws the overlay, so button clicks were getting
             // eaten (the "first click does nothing" issue). Let the UI own input; resume after.
-            if (_startOverlay?.Visible == true || _resultOverlay?.Visible == true)
+            if (_startOverlay?.Visible == true || _resultOverlay?.Visible == true || _playMenu?.Visible == true)
             {
                 _gl.RenderFrame();   // one frame so the dimmed scene stays drawn behind the panel
                 return;
