@@ -765,7 +765,7 @@ namespace MakarovPhysicsSandbox
                 BorderStyle = BorderStyle.FixedSingle,
                 Padding = new Padding(8),
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Bottom,
-                Width = 292,
+                Width = 382,
             };
 
             _playerControlsTitle = new Label
