@@ -302,6 +302,11 @@ internal sealed partial class GlPanel : Control
     public void SpawnMetalCube() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.MetalCube); Focus(); } }
     public void SpawnGasCylinder() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.GasCylinder); Focus(); } }
     public void SpawnSentinelBot() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SentinelBot); Focus(); } }
+    public void SpawnGlassCube() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.GlassCube); Focus(); } }
+    public void SpawnGlassPyramid() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.GlassPyramid); Focus(); } }
+    public void SpawnSpikePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SpikePlatform); Focus(); } }
+    public void SpawnFirePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.FirePlatform); Focus(); } }
+    public void SpawnSmokePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SmokePlatform); Focus(); } }
     public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
     public void Electrify()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Electrify); Focus(); } }
     public void Shoot()         { if (_initialized) { CancelPendingSceneAction(); ShootBall(); Focus(); } }
@@ -617,6 +622,7 @@ internal sealed partial class GlPanel : Control
         _heat.Update(simDt, _world, _ragdolls);
         _electricity.Update(simDt, _world, _ragdolls);
         UpdateMaterialReactions(simDt);
+        UpdateHazardPlatforms(simDt);
         UpdateDroneHover(simDt);
         SpawnFireEffects(simDt);
         SpawnElectricityEffects(simDt);
@@ -2334,10 +2340,10 @@ internal sealed partial class GlPanel : Control
         RigidBody body;
         switch (kind)
         {
-            case 1: { float r = 0.35f + J() * 0.4f; body = RigidBody.CreateSphere(At(r), r); break; }
+            case 1: { float r = 0.5f; body = RigidBody.CreateSphere(At(r), r); break; }
             case 3: { float r = 0.28f + J() * 0.18f; body = WithMaterial(RigidBody.CreateCapsule(At(r * 2f), r), MaterialId.Metal); break; }
-            case 4: { var h = new Vector3(0.75f + J() * 0.35f, 0.10f + J() * 0.05f, 0.45f + J() * 0.15f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // plank
-            case 5: { var h = new Vector3(0.20f + J() * 0.08f, 0.75f + J() * 0.35f, 0.20f + J() * 0.08f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // pillar
+            case 4: { var h = new Vector3(0.9f, 0.12f, 0.5f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // plank
+            case 5: { var h = new Vector3(0.22f, 0.9f, 0.22f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // pillar
             case 6: body = MakeDumbbell(At(0.45f), 0.8f + J() * 0.5f); break;
             case 7:
             {
@@ -2345,8 +2351,8 @@ internal sealed partial class GlPanel : Control
                 AddHammer(At(0.2f * hk), hk, Quaternion.CreateFromAxisAngle(Vector3.UnitY, J() * MathF.Tau), Vector3.One);
                 return;   // AddHammer adds both bodies and their joints itself
             }
-            case 8: body = WithMaterial(MakeTable(At(0.55f), 0.9f + J() * 0.3f), MaterialId.Wood); break;
-            default: { var h = new Vector3(0.3f + J() * 0.45f, 0.3f + J() * 0.45f, 0.3f + J() * 0.45f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; }
+            case 8: body = WithMaterial(MakeTable(At(0.55f), 1.0f), MaterialId.Wood); break;
+            default: { var h = new Vector3(0.5f, 0.5f, 0.5f); body = WithMaterial(RigidBody.CreateBox(At(h.Y), h), MaterialId.Wood); break; } // box (always a cube)
         }
 
         // Yaw-only variety so flat objects still sit flat where placed (no tumbling onto a corner).
@@ -2385,33 +2391,18 @@ internal sealed partial class GlPanel : Control
     // splinters). Three point joints (non-collinear) weld them rigidly enough to behave as one tool.
     private void AddHammer(Vector3 pos, float k, Quaternion rot, Vector3 color)
     {
-        var handleHalf = new Vector3(0.34f * k, 0.05f * k, 0.05f * k);
-        var headHalf = new Vector3(0.12f * k, 0.17f * k, 0.26f * k);
-        var headOffset = new Vector3(0.36f * k, 0f, 0f);
-
-        var handle = WithMaterial(RigidBody.CreateBox(pos, handleHalf, density: 1.2f), MaterialId.Wood);
-        handle.Rotation = rot; handle.UpdateDerived();
-        handle.Tag = "Hammer"; handle.Color = color;
-        handle.Breakable = true; handle.BreakThreshold = 7.0f; handle.BreakPieces = 8;
-        _world.Bodies.Add(handle);
-
-        var head = WithMaterial(RigidBody.CreateBox(pos + Vector3.Transform(headOffset, rot), headHalf, density: 2.4f), MaterialId.Metal);
-        head.Rotation = rot; head.UpdateDerived();
-        head.Tag = "Hammer"; head.Color = color;
-        head.Breakable = false;
-        _world.Bodies.Add(head);
-
-        // Weld at the junction; anchors coincide initially so there is no tug.
-        foreach (var (py, pz) in new[] { (0f, 0.16f * k), (0f, -0.16f * k), (0.12f * k, 0f) })
-        {
-            _world.Joints.Add(new Joint
-            {
-                Type = Joint.Kind.Point,
-                A = handle, B = head,
-                LocalA = new Vector3(0.30f * k, py, pz),
-                LocalB = new Vector3(-0.06f * k, py, pz),
-            });
-        }
+        // Single compound body (handle + head) instead of two welded bodies. The old point-joint weld
+        // jittered the heavy head against the light handle and shook itself apart on placement; one rigid
+        // body cannot do that. Non-breakable, so it rests stably as a tool.
+        var b = WithMaterial(RigidBody.CreateCompound(pos, [
+            ChildShape.Box(new Vector3(0.34f * k, 0.05f * k, 0.05f * k)),                                  // handle along X
+            ChildShape.Box(new Vector3(0.12f * k, 0.17f * k, 0.26f * k), new Vector3(0.36f * k, 0f, 0f)),  // head at the end
+        ], density: 2.0f), MaterialId.Wood);
+        b.Rotation = rot; b.UpdateDerived();
+        b.Tag = "Hammer";
+        b.Color = color;
+        b.Breakable = false;
+        _world.Bodies.Add(b);
     }
 
     private static RigidBody MakeHammer(Vector3 pos, float k = 1f)
@@ -2587,7 +2578,7 @@ internal sealed partial class GlPanel : Control
     {
         EvictIfFull();
         var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.52f, 0f);
-        var cube = WithMaterial(RigidBody.CreateBox(p, new Vector3(0.48f, 0.48f, 0.48f), density: 2.8f), MaterialId.Metal);
+        var cube = WithMaterial(RigidBody.CreateBox(p, new Vector3(0.5f, 0.5f, 0.5f), density: 2.8f), MaterialId.Metal);
         cube.Tag = "MetalCube";
         cube.Color = Vector3.One;
         cube.Restitution = 0.10f;
@@ -2668,6 +2659,72 @@ internal sealed partial class GlPanel : Control
         var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.65f, 0f);
         AddGlassBlock(p, new Vector3(0.42f, 0.65f, 0.42f));
         StatusUpdated?.Invoke("Placed breakable glass block. Hard impacts replace it with glass shards.");
+    }
+
+    private void SpawnGlassCubeAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.5f, 0f);
+        AddGlassBlock(p, new Vector3(0.5f, 0.5f, 0.5f));   // uniform 1-unit cube, same footprint as Box / Metal cube
+        StatusUpdated?.Invoke("Placed glass cube.");
+    }
+
+    private void SpawnGlassPyramidAtAim()
+    {
+        EvictIfFull();
+        const int layers = 6;
+        const float layerH = 0.5f;             // full height of each step
+        const float totalH = layers * layerH;  // 3.0 -> about 3x the 1.0 base width
+        var shapes = new ChildShape[layers];
+        for (int i = 0; i < layers; i++)
+        {
+            float half = 0.5f - i * (0.5f - 0.08f) / (layers - 1);          // taper 0.5 -> 0.08
+            float cy = -totalH * 0.5f + layerH * 0.5f + i * layerH;          // bottom layer rests on the base
+            shapes[i] = ChildShape.Box(new Vector3(half, layerH * 0.5f, half), new Vector3(0f, cy, 0f));
+        }
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, totalH * 0.5f, 0f);
+        var glass = WithMaterial(RigidBody.CreateCompound(p, shapes, density: 1.20f), MaterialId.Glass);
+        glass.Tag = "GlassBlock";
+        glass.Color = new Vector3(0.72f, 0.92f, 1.0f);
+        glass.Restitution = 0.16f;
+        glass.Friction = 0.22f;
+        glass.Breakable = true;
+        glass.BreakThreshold = 3.0f;
+        glass.BreakPieces = 22;
+        _world.Bodies.Add(glass);
+        StatusUpdated?.Invoke("Placed glass pyramid.");
+    }
+
+    private RigidBody AddHazardPlatform(string tag, Vector3 color)
+    {
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.12f, 0f);
+        var plat = RigidBody.CreateStaticBox(p, new Vector3(1.2f, 0.12f, 1.2f));
+        plat.Tag = tag;
+        plat.Color = color;
+        plat.Friction = 0.6f;
+        _world.Bodies.Add(plat);
+        return plat;
+    }
+
+    private void SpawnSpikePlatformAtAim()
+    {
+        EvictIfFull();
+        AddHazardPlatform("SpikePlatform", new Vector3(0.55f, 0.57f, 0.60f));
+        StatusUpdated?.Invoke("Placed spike platform. Breakable objects resting on it get shredded.");
+    }
+
+    private void SpawnFirePlatformAtAim()
+    {
+        EvictIfFull();
+        AddHazardPlatform("FirePlatform", new Vector3(0.50f, 0.14f, 0.10f));
+        StatusUpdated?.Invoke("Placed fire platform. Flammable objects on it catch fire.");
+    }
+
+    private void SpawnSmokePlatformAtAim()
+    {
+        EvictIfFull();
+        AddHazardPlatform("SmokePlatform", new Vector3(0.38f, 0.40f, 0.43f));
+        StatusUpdated?.Invoke("Placed smoke platform. It steadily emits smoke.");
     }
 
     private void SpawnWreckingBallTargetAtAim()
@@ -3049,6 +3106,21 @@ internal sealed partial class GlPanel : Control
             case PendingSceneActionKind.GasCylinder:
                 SpawnGasCylinderAtAim();
                 break;
+            case PendingSceneActionKind.GlassCube:
+                SpawnGlassCubeAtAim();
+                break;
+            case PendingSceneActionKind.GlassPyramid:
+                SpawnGlassPyramidAtAim();
+                break;
+            case PendingSceneActionKind.SpikePlatform:
+                SpawnSpikePlatformAtAim();
+                break;
+            case PendingSceneActionKind.FirePlatform:
+                SpawnFirePlatformAtAim();
+                break;
+            case PendingSceneActionKind.SmokePlatform:
+                SpawnSmokePlatformAtAim();
+                break;
             case PendingSceneActionKind.SentinelBot:
                 SpawnSentinelBotAtAim();
                 break;
@@ -3138,6 +3210,11 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.Disconnect => "disconnect",
         PendingSceneActionKind.Ignite => "ignite",
         PendingSceneActionKind.Electrify => "electrify",
+        PendingSceneActionKind.GlassCube => "glass cube",
+        PendingSceneActionKind.GlassPyramid => "glass pyramid",
+        PendingSceneActionKind.SpikePlatform => "spike platform",
+        PendingSceneActionKind.FirePlatform => "fire platform",
+        PendingSceneActionKind.SmokePlatform => "smoke platform",
         _ => "tool",
     };
 
@@ -3429,6 +3506,7 @@ internal sealed partial class GlPanel : Control
         foreach (var b in _world.Bodies)
         {
             if (b.IsStatic || !b.Breakable || b == _world.Grabbed) continue;
+            if (b.ExplosivePower > 0f) continue;   // explosives chain-detonate, they don't shatter into debris
             float d = Vector3.Distance(b.Position, center);
             if (d > radius) continue;
             float effect = strength * (1f - d / radius);     // stronger closer to the centre
@@ -3476,6 +3554,79 @@ internal sealed partial class GlPanel : Control
             _world.Joints.RemoveAll(j => j.Involves(b));
             if (_selectedBody == b) SelectBody(null);
             ApplyExplosionAt(pos, radius, strength);
+        }
+    }
+
+    private float _smokePlatformTimer;
+
+    // Static hazard slabs: a spike pad shreds breakable bodies resting on it, a fire pad ignites
+    // flammable ones, a smoke pad just streams smoke. All driven from the body's footprint so they
+    // keep working wherever the user drops them.
+    private void UpdateHazardPlatforms(float dt)
+    {
+        if (dt <= 0f) return;
+
+        List<RigidBody>? platforms = null;
+        foreach (var b in _world.Bodies)
+        {
+            if (!b.IsStatic) continue;
+            var t = b.Tag as string;
+            if (t == "SpikePlatform" || t == "FirePlatform" || t == "SmokePlatform")
+                (platforms ??= new List<RigidBody>()).Add(b);
+        }
+        if (platforms == null) return;
+
+        _smokePlatformTimer += dt;
+        bool emitSmoke = _smokePlatformTimer >= 0.05f;
+        if (emitSmoke) _smokePlatformTimer = 0f;
+
+        foreach (var plat in platforms)
+        {
+            var tag = (string)plat.Tag!;
+            var he = plat.Children[0].HalfExtents;
+            float topY = plat.Position.Y + he.Y;
+
+            if (tag == "SmokePlatform")
+            {
+                if (emitSmoke)
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var off = new Vector3(((float)_rng.NextDouble() - 0.5f) * he.X * 1.6f, 0f,
+                                              ((float)_rng.NextDouble() - 0.5f) * he.Z * 1.6f);
+                        var vel = new Vector3(((float)_rng.NextDouble() - 0.5f) * 0.4f,
+                                              0.8f + (float)_rng.NextDouble() * 0.7f,
+                                              ((float)_rng.NextDouble() - 0.5f) * 0.4f);
+                        AddSmokeParticle(plat.Position + new Vector3(0f, he.Y, 0f) + off, vel,
+                                         new Vector3(0.6f, 0.6f, 0.62f), 1.6f, 0.5f);
+                    }
+                continue;
+            }
+
+            // Fire / spike: collect dynamic user bodies resting on the slab footprint.
+            List<RigidBody>? hits = null;
+            foreach (var b in _world.Bodies)
+            {
+                if (b.IsStatic || !b.UserObject) continue;
+                var d = b.Position - plat.Position;
+                if (MathF.Abs(d.X) > he.X + b.BoundingRadius) continue;
+                if (MathF.Abs(d.Z) > he.Z + b.BoundingRadius) continue;
+                if (b.Position.Y - b.BoundingRadius > topY + 0.25f) continue;   // sitting on / just above the surface
+                if (b.Position.Y < topY - 0.6f) continue;
+                (hits ??= new List<RigidBody>()).Add(b);
+            }
+            if (hits == null) continue;
+
+            if (tag == "FirePlatform")
+            {
+                foreach (var b in hits)
+                    if (b.Flammability > 0f && !b.Burning) _heat.Ignite(b);
+            }
+            else // SpikePlatform
+            {
+                foreach (var b in hits)
+                    if (b.Breakable && b.BoundingRadius >= 0.16f)
+                        _world.FractureBody(b, b.Position, Vector3.UnitY, b.BreakThreshold + 4f);
+            }
         }
     }
 

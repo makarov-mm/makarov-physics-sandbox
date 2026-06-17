@@ -37,5 +37,10 @@ public enum PendingSceneActionKind
     Piston, 
     SlidingDoor, 
     Ignite, 
-    Electrify
+    Electrify,
+    GlassCube,
+    GlassPyramid,
+    SpikePlatform,
+    FirePlatform,
+    SmokePlatform
 }
