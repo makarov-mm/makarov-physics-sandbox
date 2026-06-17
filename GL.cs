@@ -8,10 +8,8 @@ namespace MakarovPhysicsSandbox;
 /// </summary>
 internal static class GL
 {
-    // ---- constants ----
     public const uint COLOR_BUFFER_BIT = 0x00004000;
     public const uint DEPTH_BUFFER_BIT = 0x00000100;
-
     public const uint DEPTH_TEST = 0x0B71;
     public const uint BLEND = 0x0BE2;
     public const uint SRC_ALPHA = 0x0302;
@@ -24,20 +22,16 @@ internal static class GL
     public const uint CCW = 0x0901;
     public const uint LESS = 0x0201;
     public const uint LEQUAL = 0x0203;
-
     public const uint TRIANGLES = 0x0004;
     public const uint UNSIGNED_INT = 0x1405;
     public const uint FLOAT = 0x1406;
-
     public const uint ARRAY_BUFFER = 0x8892;
     public const uint ELEMENT_ARRAY_BUFFER = 0x8893;
     public const uint STATIC_DRAW = 0x88E4;
-
     public const uint VERTEX_SHADER = 0x8B31;
     public const uint FRAGMENT_SHADER = 0x8B30;
     public const uint COMPILE_STATUS = 0x8B81;
     public const uint LINK_STATUS = 0x8B82;
-
     public const uint TEXTURE_2D = 0x0DE1;
     public const uint TEXTURE0 = 0x84C0;
     public const uint TEXTURE1 = 0x84C1;
@@ -57,13 +51,10 @@ internal static class GL
     public const uint TEXTURE_WRAP_T = 0x2803;
     public const uint CLAMP_TO_BORDER = 0x812D;
     public const uint TEXTURE_BORDER_COLOR = 0x1004;
-
     public const uint FRAMEBUFFER = 0x8D40;
     public const uint DEPTH_ATTACHMENT = 0x8D00;
     public const uint FRAMEBUFFER_COMPLETE = 0x8CD5;
     public const uint NONE = 0;
-
-    public const uint VERSION = 0x1F02;
 
     // ---- GL 1.1: direct exports ----
     [DllImport("opengl32.dll", EntryPoint = "glClear")] public static extern void Clear(uint mask);
@@ -87,14 +78,22 @@ internal static class GL
         GenTextures(1, t);
         return t[0];
     }
+
     [DllImport("opengl32.dll", EntryPoint = "glBindTexture")] public static extern void BindTexture(uint target, uint texture);
     [DllImport("opengl32.dll", EntryPoint = "glTexImage2D")] public static extern void TexImage2D(uint target, int level, int internalFormat, int w, int h, int border, uint format, uint type, IntPtr pixels);
 
     public static void TexImage2D(uint target, int level, int internalFormat, int w, int h, int border, uint format, uint type, byte[] pixels)
     {
         var handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
-        try { TexImage2D(target, level, internalFormat, w, h, border, format, type, handle.AddrOfPinnedObject()); }
-        finally { handle.Free(); }
+
+        try
+        {
+            TexImage2D(target, level, internalFormat, w, h, border, format, type, handle.AddrOfPinnedObject());
+        }
+        finally
+        {
+            handle.Free();
+        }
     }
     [DllImport("opengl32.dll", EntryPoint = "glTexParameteri")] public static extern void TexParameteri(uint target, uint pname, int param);
     [DllImport("opengl32.dll", EntryPoint = "glTexParameterfv")] public static extern void TexParameterfv(uint target, uint pname, float[] params_);
@@ -174,8 +173,11 @@ internal static class GL
     public static void LoadFunctions()
     {
         _opengl32 = Win32.GetModuleHandleW("opengl32.dll");
+
         if (_opengl32 == IntPtr.Zero)
+        {
             _opengl32 = Win32.LoadLibraryW("opengl32.dll");
+        }
 
         _createShader = Load<CreateShaderDel>("glCreateShader");
         _shaderSource = Load<ShaderSourceDel>("glShaderSource");
@@ -236,12 +238,23 @@ internal static class GL
     public static void ShaderSource(uint shader, string source)
     {
         IntPtr str = Marshal.StringToHGlobalAnsi(source);
-        try { _shaderSource(shader, 1, new[] { str }, new[] { source.Length }); }
-        finally { Marshal.FreeHGlobal(str); }
+        try
+        {
+            _shaderSource(shader, 1, [str], [source.Length]);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(str);
+        }
     }
 
     public static void CompileShader(uint shader) => _compileShader(shader);
-    public static int GetShaderi(uint shader, uint pname) { _getShaderiv(shader, pname, out int v); return v; }
+
+    public static int GetShaderi(uint shader, uint pname)
+    {
+        _getShaderiv(shader, pname, out int v); 
+        return v;
+    }
 
     public static string GetShaderInfoLog(uint shader)
     {
@@ -265,14 +278,12 @@ internal static class GL
     public static void UseProgram(uint program) => _useProgram(program);
     public static void DeleteShader(uint shader) => _deleteShader(shader);
     public static int GetUniformLocation(uint program, string name) => _getUniformLocation(program, name);
-
     public static void UniformMatrix4(int location, float[] m16) => _uniformMatrix4fv(location, 1, 0, m16);
     public static void Uniform3(int location, float x, float y, float z) => _uniform3f(location, x, y, z);
     public static void Uniform1(int location, int v) => _uniform1i(location, v);
     public static void Uniform1(int location, float v) => _uniform1f(location, v);
     /// <summary>Uploads `count` vec4s from a flat float array (x,y,z,w per element).</summary>
     public static void Uniform4(int location, int count, float[] values) => _uniform4fv(location, count, values);
-
     public static uint GenVertexArray() { var a = new uint[1]; _genVertexArrays(1, a); return a[0]; }
     public static void BindVertexArray(uint vao) => _bindVertexArray(vao);
     public static uint GenBuffer() { var a = new uint[1]; _genBuffers(1, a); return a[0]; }
@@ -280,29 +291,29 @@ internal static class GL
 
     public static void BufferData(uint target, float[] data, uint usage)
     {
-        var h = GCHandle.Alloc(data, GCHandleType.Pinned);
+        GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
 
         try
         {
-            _bufferData(target, data.Length * sizeof(float), h.AddrOfPinnedObject(), usage);
+            _bufferData(target, data.Length * sizeof(float), handle.AddrOfPinnedObject(), usage);
         }
         finally
         {
-            h.Free();
+            handle.Free();
         }
     }
 
     public static void BufferData(uint target, uint[] data, uint usage)
     {
-        var h = GCHandle.Alloc(data, GCHandleType.Pinned);
+        GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
 
         try
         {
-            _bufferData(target, (IntPtr)(data.Length * sizeof(uint)), h.AddrOfPinnedObject(), usage);
+            _bufferData(target, data.Length * sizeof(uint), handle.AddrOfPinnedObject(), usage);
         }
         finally
         {
-            h.Free();
+            handle.Free();
         }
     }
 

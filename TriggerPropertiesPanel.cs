@@ -56,6 +56,7 @@ internal sealed class TriggerPropertiesPanel : Panel
             RowCount = 0,
             AutoScroll = true,
         };
+
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 43));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 57));
 
@@ -129,16 +130,21 @@ internal sealed class TriggerPropertiesPanel : Panel
 
     private static void ApplyControlTheme(Control root)
     {
-        foreach (Control c in root.Controls)
+        foreach (Control control in root.Controls)
         {
-            if (c is Label or CheckBox or GroupBox) c.ForeColor = Color.Gainsboro;
-            if (c is Button b)
+            if (control is Label or CheckBox or GroupBox)
             {
-                b.BackColor = Color.FromArgb(52, 60, 72);
-                b.ForeColor = Color.WhiteSmoke;
-                b.FlatStyle = FlatStyle.Flat;
+                control.ForeColor = Color.Gainsboro;
             }
-            ApplyControlTheme(c);
+
+            if (control is Button button)
+            {
+                button.BackColor = Color.FromArgb(52, 60, 72);
+                button.ForeColor = Color.WhiteSmoke;
+                button.FlatStyle = FlatStyle.Flat;
+            }
+
+            ApplyControlTheme(control);
         }
     }
 
@@ -146,33 +152,45 @@ internal sealed class TriggerPropertiesPanel : Panel
     {
         _updating = true;
         _hasSelection = s != null;
-        if (s == null)
+
+        if (s is null)
         {
             _info.Text = "No trigger selected.\nClick a sensor plate in the scene.";
             _outputs.Items.Clear();
             _outputsInfo.Text = "No graph outputs.";
             BindSelectedOutputEditor();
             ApplyControlTheme(this);
-        SetEnabled(false);
+            SetEnabled(false);
             _updating = false;
             return;
         }
+
         _info.Text = $"Selected: {s.Name} ({s.Action}) · outputs: {s.OutputCount}";
         _name.Text = s.Name;
         _action.SelectedItem = s.Action.ToString();
         _enabled.Checked = s.Enabled;
         _oneShot.Checked = s.OneShot;
+
         Set(_px, s.Position.X); Set(_py, s.Position.Y); Set(_pz, s.Position.Z);
         Set(_sx, s.HalfExtents.X); Set(_sy, s.HalfExtents.Y); Set(_sz, s.HalfExtents.Z);
         Set(_radius, s.Radius); Set(_strength, s.Strength); Set(_cooldown, s.CooldownSeconds);
         Set(_tx, s.TargetPosition.X); Set(_ty, s.TargetPosition.Y); Set(_tz, s.TargetPosition.Z);
         _outputs.Items.Clear();
-        foreach (var output in s.Outputs)
+
+        foreach (SelectedTriggerOutputSnapshot output in s.Outputs)
+        {
             _outputs.Items.Add(output);
+        }
+
         _outputsInfo.Text = s.Outputs.Count == 0
             ? "Legacy mode: this trigger uses Action + Target position. Press F7 to create a graph output."
             : $"{s.Outputs.Count} graph output(s). Select one to test/remove.";
-        if (_outputs.Items.Count > 0) _outputs.SelectedIndex = 0;
+
+        if (_outputs.Items.Count > 0)
+        {
+            _outputs.SelectedIndex = 0;
+        }
+
         BindSelectedOutputEditor();
         SetEnabled(true);
         _updating = false;
@@ -182,6 +200,7 @@ internal sealed class TriggerPropertiesPanel : Panel
     {
         bool wasUpdating = _updating;
         _updating = true;
+
         if (_outputs.SelectedItem is SelectedTriggerOutputSnapshot output)
         {
             _outputAction.SelectedItem = output.Action.ToString();
@@ -198,6 +217,7 @@ internal sealed class TriggerPropertiesPanel : Panel
             Set(_outputStrength, 10f);
             _outputEnabled.Checked = true;
         }
+
         _updating = wasUpdating;
     }
 
@@ -214,6 +234,7 @@ internal sealed class TriggerPropertiesPanel : Panel
     {
         if (!_hasSelection || _updating) return;
         Enum.TryParse<TriggerActionKind>(_action.SelectedItem?.ToString(), out var action);
+
         ApplyRequested?.Invoke(new SelectedTriggerProperties
         {
             Name = _name.Text,
@@ -229,7 +250,6 @@ internal sealed class TriggerPropertiesPanel : Panel
         });
     }
 
-
     public void ApplyPolishedTheme()
     {
         BackColor = Color.FromArgb(38, 42, 49);
@@ -241,53 +261,65 @@ internal sealed class TriggerPropertiesPanel : Panel
 
     private static void ApplyThemeRecursive(Control parent)
     {
-        foreach (Control c in parent.Controls)
+        foreach (Control control in parent.Controls)
         {
-            switch (c)
+            switch (control)
             {
-                case Button b:
-                    b.FlatStyle = FlatStyle.Flat;
-                    b.BackColor = Color.FromArgb(56, 62, 72);
-                    b.ForeColor = Color.White;
-                    b.FlatAppearance.BorderColor = Color.FromArgb(82, 91, 105);
+                case Button button:
+                    button.FlatStyle = FlatStyle.Flat;
+                    button.BackColor = Color.FromArgb(56, 62, 72);
+                    button.ForeColor = Color.White;
+                    button.FlatAppearance.BorderColor = Color.FromArgb(82, 91, 105);
                     break;
-                case TextBox t:
-                    t.BackColor = Color.FromArgb(26, 29, 34);
-                    t.ForeColor = Color.White;
-                    t.BorderStyle = BorderStyle.FixedSingle;
+
+                case TextBox textBox:
+                    textBox.BackColor = Color.FromArgb(26, 29, 34);
+                    textBox.ForeColor = Color.White;
+                    textBox.BorderStyle = BorderStyle.FixedSingle;
                     break;
-                case ComboBox cb:
-                    cb.BackColor = Color.FromArgb(26, 29, 34);
-                    cb.ForeColor = Color.White;
-                    cb.FlatStyle = FlatStyle.Flat;
+
+                case ComboBox comboBox:
+                    comboBox.BackColor = Color.FromArgb(26, 29, 34);
+                    comboBox.ForeColor = Color.White;
+                    comboBox.FlatStyle = FlatStyle.Flat;
                     break;
-                case ListBox lb:
-                    lb.BackColor = Color.FromArgb(26, 29, 34);
-                    lb.ForeColor = Color.White;
-                    lb.BorderStyle = BorderStyle.FixedSingle;
+
+                case ListBox listBox:
+                    listBox.BackColor = Color.FromArgb(26, 29, 34);
+                    listBox.ForeColor = Color.White;
+                    listBox.BorderStyle = BorderStyle.FixedSingle;
                     break;
-                case NumericUpDown n:
-                    n.BackColor = Color.FromArgb(26, 29, 34);
-                    n.ForeColor = Color.White;
+
+                case NumericUpDown numericUpDown:
+                    numericUpDown.BackColor = Color.FromArgb(26, 29, 34);
+                    numericUpDown.ForeColor = Color.White;
                     break;
-                case CheckBox ch:
-                    ch.ForeColor = Color.Gainsboro;
+
+                case CheckBox checkBox:
+                    checkBox.ForeColor = Color.Gainsboro;
                     break;
-                case Label l:
-                    l.ForeColor = Color.Gainsboro;
+
+                case Label label:
+                    label.ForeColor = Color.Gainsboro;
                     break;
+
                 case Panel panel:
                     panel.BackColor = Color.FromArgb(38, 42, 49);
                     panel.ForeColor = Color.Gainsboro;
                     break;
             }
-            ApplyThemeRecursive(c);
+
+            ApplyThemeRecursive(control);
         }
     }
 
     private void SetEnabled(bool enabled)
     {
-        foreach (Control c in Controls) SetEnabledRecursive(c, enabled);
+        foreach (Control control in Controls)
+        {
+            SetEnabledRecursive(control, enabled);
+        }
+
         _title.Enabled = true;
         _info.Enabled = true;
     }
@@ -295,7 +327,11 @@ internal sealed class TriggerPropertiesPanel : Panel
     private static void SetEnabledRecursive(Control c, bool enabled)
     {
         c.Enabled = enabled;
-        foreach (Control child in c.Controls) SetEnabledRecursive(child, enabled);
+
+        foreach (Control child in c.Controls)
+        {
+            SetEnabledRecursive(child, enabled);
+        }
     }
 
     private static NumericUpDown Num(decimal min, decimal max, decimal value, int decimals) => new()
@@ -316,17 +352,32 @@ internal sealed class TriggerPropertiesPanel : Panel
 
     private static void AddHeader(TableLayoutPanel t, string text)
     {
-        var l = new Label { Text = text, Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), AutoSize = true, ForeColor = Color.Gainsboro, Margin = new Padding(0, 10, 0, 2) };
-        t.Controls.Add(l, 0, t.RowCount);
-        t.SetColumnSpan(l, 2);
+        var label = new Label
+        {
+            Text = text, 
+            Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), 
+            AutoSize = true, 
+            ForeColor = Color.Gainsboro, 
+            Margin = new Padding(0, 10, 0, 2)
+        };
+
+        t.Controls.Add(label, 0, t.RowCount);
+        t.SetColumnSpan(label, 2);
         t.RowCount++;
     }
 
-    private static void AddRow(TableLayoutPanel t, string label, Control control)
+    private static void AddRow(TableLayoutPanel layoutPanel, string label, Control control)
     {
-        t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.Gainsboro }, 0, t.RowCount);
-        t.Controls.Add(control, 1, t.RowCount);
-        t.RowCount++;
+        layoutPanel.Controls.Add(new Label
+        {
+            Text = label, 
+            AutoSize = true, 
+            Anchor = AnchorStyles.Left, 
+            ForeColor = Color.Gainsboro
+        }, 0, layoutPanel.RowCount);
+
+        layoutPanel.Controls.Add(control, 1, layoutPanel.RowCount);
+        layoutPanel.RowCount++;
     }
 
     private static void AddControl(TableLayoutPanel t, Control control)

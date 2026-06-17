@@ -301,8 +301,8 @@ internal sealed class PhysicsWorld
 
     private void CreateBreakPiecesForChild(RigidBody source, ChildShape child, List<RigidBody> pieces)
     {
-        var childPos = source.Position + Vector3.Transform(child.LocalPos, source.Rotation);
-        var childRot = source.Rotation.Multiply(child.LocalRot);
+        Vector3 childPos = source.Position + Vector3.Transform(child.LocalPos, source.Rotation);
+        Quaternion childRot = source.Rotation.Multiply(child.LocalRot);
         int maxPieces = Math.Clamp(source.BreakPieces, 3, 18);
 
         if (child.Shape == ShapeType.Box)
@@ -315,32 +315,41 @@ internal sealed class PhysicsWorld
                 case MaterialId.Wood:
                     CreateWoodSplinters(source, childPos, childRot, he, pieces, maxPieces);
                     return;
+
                 case MaterialId.Glass:
                 case MaterialId.Ice:
                     CreateGlassShards(source, childPos, childRot, he, pieces, maxPieces);
                     return;
+
                 case MaterialId.Stone:
                     CreateStoneChunks(source, childPos, childRot, he, pieces, maxPieces);
                     return;
+
                 case MaterialId.Plastic:
                 case MaterialId.Synthetic:
                     CreatePlasticFragments(source, childPos, childRot, he, pieces, maxPieces);
                     return;
             }
 
-            var smallHe = Vector3.Max(he * 0.46f, new Vector3(0.06f));
+            Vector3 smallHe = Vector3.Max(he * 0.46f, new Vector3(0.06f));
             int made = 0;
+
             for (int sx = -1; sx <= 1 && made < maxPieces; sx += 2)
+            {
                 for (int sy = -1; sy <= 1 && made < maxPieces; sy += 2)
+                {
                     for (int sz = -1; sz <= 1 && made < maxPieces; sz += 2)
                     {
                         var local = new Vector3(sx * he.X * 0.48f, sy * he.Y * 0.48f, sz * he.Z * 0.48f);
-                        var p = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), smallHe, MathF.Max(source.Density, 0.001f));
-                        p.Rotation = childRot;
-                        p.UpdateDerived();
-                        pieces.Add(p);
+                        RigidBody body = RigidBody.CreateBox(childPos + Vector3.Transform(local, childRot), smallHe, MathF.Max(source.Density, 0.001f));
+                        body.Rotation = childRot;
+                        body.UpdateDerived();
+                        pieces.Add(body);
                         made++;
                     }
+                }
+            }
+
             return;
         }
 
@@ -348,9 +357,10 @@ internal sealed class PhysicsWorld
         {
             float r = MathF.Max(child.Radius * 0.42f, 0.055f);
             int count = Math.Min(maxPieces, 7);
+
             for (int i = 0; i < count; i++)
             {
-                var dir = RandomUnit();
+                Vector3 dir = RandomUnit();
                 var p = RigidBody.CreateSphere(childPos + dir * child.Radius * 0.38f, r, MathF.Max(source.Density, 0.001f));
                 pieces.Add(p);
             }
@@ -362,6 +372,7 @@ internal sealed class PhysicsWorld
         {
             float r = MathF.Max(child.Radius * 0.38f, 0.05f);
             int count = Math.Min(maxPieces, 6);
+
             for (int i = 0; i < count; i++)
             {
                 float u = count == 1 ? 0f : (i / (float)(count - 1) - 0.5f) * child.HalfHeight * 2f;

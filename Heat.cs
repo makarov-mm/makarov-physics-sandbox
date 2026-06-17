@@ -41,18 +41,20 @@ internal sealed class HeatSystem
     public void Clear() => _fuel.Clear();
 
     /// <summary>Effective flammability after the density gate (metal/stone resist).</summary>
-    private static float EffectiveFlammability(RigidBody b)
+    private static float EffectiveFlammability(RigidBody body)
     {
-        if (b.Flammability <= 0f) return 0f;
+        if (body.Flammability <= 0f) return 0f;
 
         // Ragdoll bones are intentionally dense for stable rigid-body motion. Do not use
         // that physics density to make them almost fireproof; otherwise the ignite tool
         // flashes for less than a second and never does meaningful damage.
-        if (b.Tag is RagdollBone)
-            return Math.Clamp(b.Flammability, 0f, 1.5f);
+        if (body.Tag is RagdollBone)
+        {
+            return Math.Clamp(body.Flammability, 0f, 1.5f);
+        }
 
-        float densityGate = b.Density >= DensityFireproof ? 0.12f : 1f;
-        return b.Flammability * densityGate * (1f - 0.85f * Math.Clamp(b.Wetness, 0f, 1f));
+        float densityGate = body.Density >= DensityFireproof ? 0.12f : 1f;
+        return body.Flammability * densityGate * (1f - 0.85f * Math.Clamp(body.Wetness, 0f, 1f));
     }
 
     /// <summary>Light a body on fire directly (the igniter tool, or future incendiary effects).</summary>
@@ -75,36 +77,39 @@ internal sealed class HeatSystem
 
         // Drop fuel entries for bodies that left the world (reset / clear / eviction).
         if (_fuel.Count > 0)
+        {
             _fuel.RemoveAll(world);
+        }
 
         // 1) Burning bodies: hold temperature, burn fuel, hurt ragdoll bones, heat neighbours.
         //    Collect newly-ignited bodies separately so we don't mutate while iterating.
         List<RigidBody>? toIgnite = null;
 
-        foreach (var b in world.Bodies)
+        foreach (RigidBody body in world.Bodies)
         {
-            if (b.Burning)
+            if (body.Burning)
             {
-                if (b.Wetness > 0.55f)
+                if (body.Wetness > 0.55f)
                 {
-                    Extinguish(b);
+                    Extinguish(body);
                     continue;
                 }
 
-                b.Temperature = MathF.Max(b.Temperature, BurnTemperature * 0.85f);
-
-                float fuel = _fuel.GetValueOrDefault(b, BaseFuel);
+                body.Temperature = MathF.Max(body.Temperature, BurnTemperature * 0.85f);
+                float fuel = _fuel.GetValueOrDefault(body, BaseFuel);
                 fuel -= dt;
+
                 if (fuel <= 0f)
                 {
-                    BurnOut(b);
+                    BurnOut(body);
                     continue;
                 }
-                _fuel[b] = fuel;
-                b.Wake();
+
+                _fuel[body] = fuel;
+                body.Wake();
 
                 // fire damages a burning ragdoll bone (sever-capable: fire can kill).
-                if (b.Tag is RagdollBone { Severed: false } bone)
+                if (body.Tag is RagdollBone { Severed: false } bone)
                 {
                     bone.Burning = true;
                     ragdolls.DamageBone(bone, FireDamagePerSecond * dt, world);
@@ -113,8 +118,8 @@ internal sealed class HeatSystem
                 // radiate to nearby flammable bodies
                 foreach (var other in world.Bodies)
                 {
-                    if (ReferenceEquals(other, b) || other.IsStatic || other.Burning) continue;
-                    float d2 = Vector3.DistanceSquared(b.Position, other.Position);
+                    if (ReferenceEquals(other, body) || other.IsStatic || other.Burning) continue;
+                    float d2 = Vector3.DistanceSquared(body.Position, other.Position);
                     float reach = SpreadRadius + other.BoundingRadius;
                     if (d2 > reach * reach) continue;
                     float falloff = 1f - MathF.Sqrt(d2) / reach;
@@ -124,75 +129,84 @@ internal sealed class HeatSystem
             else
             {
                 // 2) Cool toward ambient.
-                if (b.Temperature > Ambient)
-                    b.Temperature = Ambient + (b.Temperature - Ambient) / (1f + CoolRate * dt);
+                if (body.Temperature > Ambient)
+                {
+                    body.Temperature = Ambient + (body.Temperature - Ambient) / (1f + CoolRate * dt);
+                }
 
                 // 3) Auto-ignite if hot enough and flammable.
-                if (b is { Temperature: >= IgnitionPoint, IsStatic: false } && EffectiveFlammability(b) > 0.02f)
+                if (body is { Temperature: >= IgnitionPoint, IsStatic: false } && EffectiveFlammability(body) > 0.02f)
                 {
-                    (toIgnite ??= []).Add(b);
+                    (toIgnite ??= []).Add(body);
                 }
             }
         }
 
-        if (toIgnite != null)
-            foreach (var b in toIgnite) Ignite(b);
+        if (toIgnite is not null)
+        {
+            foreach (RigidBody body in toIgnite)
+            {
+                Ignite(body);
+            }
+        }
     }
 
-    private void Extinguish(RigidBody b)
+    private void Extinguish(RigidBody body)
     {
-        b.Burning = false;
+        body.Burning = false;
 
-        if (b.Tag is RagdollBone bone)
+        if (body.Tag is RagdollBone bone)
         {
             bone.Burning = false;
         }
 
-        b.Temperature = MathF.Min(b.Temperature, 90f);
-        _fuel.Remove(b);
-        b.Wake();
+        body.Temperature = MathF.Min(body.Temperature, 90f);
+        _fuel.Remove(body);
+        body.Wake();
     }
 
-    private void BurnOut(RigidBody b)
+    private void BurnOut(RigidBody body)
     {
-        b.Burning = false;
+        body.Burning = false;
 
-        if (b.Tag is RagdollBone bone)
+        if (body.Tag is RagdollBone bone)
         {
             bone.Burning = false;
         }
 
-        b.Flammability = 0f;          // charred: won't reignite
-        b.Temperature = 220f;         // stays warm a moment, then cools via the normal path
-        _fuel.Remove(b);
-        b.Color *= 0.35f;             // scorch mark
+        body.Flammability = 0f; // charred: won't reignite
+        body.Temperature = 220f; // stays warm a moment, then cools via the normal path
+        _fuel.Remove(body);
+        body.Color *= 0.35f; // scorch mark
     }
 
     // ------------------------------------------------------------------ render tint
 
     /// <summary>If this body is on fire (or still glowing hot), return the colour + emissive
     /// it should render with. Takes priority over the normal/ragdoll tint.</summary>
-    public static bool TryTint(RigidBody b, out Vector3 color, out float emissive)
+    public static bool TryTint(RigidBody body, out Vector3 color, out float emissive)
     {
         color = default;
         emissive = 0f;
 
-        if (b.Burning)
+        if (body.Burning)
         {
             // cheap flicker from position + temperature, no extra time plumbing needed
-            float flick = 0.75f + 0.25f * MathF.Sin(b.Temperature * 0.05f + b.Position.X * 7f + b.Position.Z * 5f);
+            float flick = 0.75f + 0.25f * MathF.Sin(body.Temperature * 0.05f + body.Position.X * 7f + body.Position.Z * 5f);
             color = new Vector3(1.0f, 0.45f, 0.12f) * flick;
             emissive = 0.85f * flick;
             return true;
         }
-        if (b.Temperature > 90f)
+
+        if (body.Temperature > 90f)
         {
             // glowing-hot but not (yet) aflame: ember tint that fades as it cools
-            float t = Math.Clamp((b.Temperature - 90f) / (IgnitionPoint - 90f), 0f, 1f);
-            color = Vector3.Lerp(b.Color, new Vector3(0.9f, 0.25f, 0.08f), t);
+            float t = Math.Clamp((body.Temperature - 90f) / (IgnitionPoint - 90f), 0f, 1f);
+            color = Vector3.Lerp(body.Color, new Vector3(0.9f, 0.25f, 0.08f), t);
             emissive = 0.35f * t;
             return true;
         }
+
         return false;
     }
 }

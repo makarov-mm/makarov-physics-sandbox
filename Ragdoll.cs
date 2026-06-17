@@ -534,7 +534,16 @@ internal sealed class RagdollSystem
         body.MaterialId = MaterialId.Synthetic;
         body.Flammability = 1.0f;    // flesh burns readily (fire -> bone damage; see HeatSystem)
 
-        var bone = new RagdollBone { Body = body, Name = name, Owner = rag, MaxHealth = hp, Health = hp, Vital = vital };
+        var bone = new RagdollBone
+        {
+            Body = body, 
+            Name = name, 
+            Owner = rag, 
+            MaxHealth = hp, 
+            Health = hp, 
+            Vital = vital
+        };
+
         body.Color = new Vector3(0.86f, 0.66f, 0.56f);
         body.Tag = bone;             // back-reference for render tint + damage lookup
         rag.Bones.Add(bone);

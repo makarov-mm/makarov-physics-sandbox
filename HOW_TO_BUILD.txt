@@ -48,9 +48,15 @@ depot_build_ТВОЙ_DEPOTID.vdf:
 Замени ТВОЙ_DEPOTID на число из шага 4 (и в имени файла тоже).
 6. Залей. Из папки builder\:
 steamcmd.exe +login mm_makarov +run_app_build "..\scripts\app_build_4861360.vdf" +quit
+steamcmd.exe +login mm_makarov +run_app_build "..\scripts\app_build_4862930.vdf" +quit
 
 
 7. Поставь билд live на ветку. App Admin → SteamPipe → Builds — там появится твой залитый билд. Выставь его live на ветку default (заливка сама live не становится, это вручную). Можно сначала на тестовую ветку, потом на default.
 После этого «At Least One Build Configured» позеленеет, а когда добавишь launch option (Installation → Executable = Wrecksmith.exe, OS Windows) — позеленеет и «Launch Options Defined».
 Проверка: с твоего аккаунта-разработчика игру можно установить через клиент Steam даже при App Release State = Unavailable — так протестируешь, что билд скачивается и запускается.
 Где обычно спотыкаются: неправильный DepotID, в content\ попадает лишнее (исходники/папки bin вместо чистого publish), или забывают выставить билд live.
+
+
+
+
+https://store.steampowered.com/app/4861360/Wrecksmith/

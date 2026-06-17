@@ -16,7 +16,6 @@ internal sealed partial class GlPanel
     public void SpawnPiston() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Piston); Focus(); } }
     public void SpawnSlidingDoor() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SlidingDoor); Focus(); } }
 
-
     public void SnapSelectedTriggerTargetToNearestMechanism()
     {
         if (_selectedTrigger == null)

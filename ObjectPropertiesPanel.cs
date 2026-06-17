@@ -203,52 +203,67 @@ internal sealed class ObjectPropertiesPanel : Panel
         {
             switch (c)
             {
-                case Button b:
-                    b.FlatStyle = FlatStyle.Flat;
-                    b.BackColor = Color.FromArgb(56, 62, 72);
-                    b.ForeColor = Color.White;
-                    b.FlatAppearance.BorderColor = Color.FromArgb(82, 91, 105);
+                case Button button:
+                    button.FlatStyle = FlatStyle.Flat;
+                    button.BackColor = Color.FromArgb(56, 62, 72);
+                    button.ForeColor = Color.White;
+                    button.FlatAppearance.BorderColor = Color.FromArgb(82, 91, 105);
                     break;
-                case TextBox t:
-                    t.BackColor = Color.FromArgb(26, 29, 34);
-                    t.ForeColor = Color.White;
-                    t.BorderStyle = BorderStyle.FixedSingle;
+
+                case TextBox textBox:
+                    textBox.BackColor = Color.FromArgb(26, 29, 34);
+                    textBox.ForeColor = Color.White;
+                    textBox.BorderStyle = BorderStyle.FixedSingle;
                     break;
-                case ComboBox cb:
-                    cb.BackColor = Color.FromArgb(26, 29, 34);
-                    cb.ForeColor = Color.White;
-                    cb.FlatStyle = FlatStyle.Flat;
+
+                case ComboBox checkBox:
+                    checkBox.BackColor = Color.FromArgb(26, 29, 34);
+                    checkBox.ForeColor = Color.White;
+                    checkBox.FlatStyle = FlatStyle.Flat;
                     break;
-                case NumericUpDown n:
-                    n.BackColor = Color.FromArgb(26, 29, 34);
-                    n.ForeColor = Color.White;
+
+                case NumericUpDown numericUpDown:
+                    numericUpDown.BackColor = Color.FromArgb(26, 29, 34);
+                    numericUpDown.ForeColor = Color.White;
                     break;
-                case CheckBox ch:
-                    ch.ForeColor = Color.Gainsboro;
+
+                case CheckBox checkBox:
+                    checkBox.ForeColor = Color.Gainsboro;
                     break;
-                case Label l:
-                    l.ForeColor = Color.Gainsboro;
+
+                case Label label:
+                    label.ForeColor = Color.Gainsboro;
                     break;
+
                 case Panel panel:
                     panel.BackColor = Color.FromArgb(38, 42, 49);
                     panel.ForeColor = Color.Gainsboro;
                     break;
             }
+
             ApplyThemeRecursive(c);
         }
     }
 
     private void SetEnabled(bool enabled)
     {
-        foreach (Control c in Controls) SetEnabledRecursive(c, enabled);
+        foreach (Control control in Controls)
+        {
+            SetEnabledRecursive(control, enabled);
+        }
+
         _title.Enabled = true;
         _info.Enabled = true;
     }
 
-    private static void SetEnabledRecursive(Control c, bool enabled)
+    private static void SetEnabledRecursive(Control control, bool enabled)
     {
-        c.Enabled = enabled;
-        foreach (Control child in c.Controls) SetEnabledRecursive(child, enabled);
+        control.Enabled = enabled;
+
+        foreach (Control child in control.Controls)
+        {
+            SetEnabledRecursive(child, enabled);
+        }
     }
 
     private static NumericUpDown Num(decimal min, decimal max, decimal value, int decimals) => new()
@@ -269,7 +284,7 @@ internal sealed class ObjectPropertiesPanel : Panel
 
     private static void AddHeader(TableLayoutPanel t, string text)
     {
-        var l = new Label
+        var label = new Label
         {
             Text = text, 
             Font = new Font(SystemFonts.MessageBoxFont, FontStyle.Bold), 
@@ -278,24 +293,31 @@ internal sealed class ObjectPropertiesPanel : Panel
             Margin = new Padding(0, 10, 0, 2)
         };
 
-        t.Controls.Add(l, 0, t.RowCount);
-        t.SetColumnSpan(l, 2);
+        t.Controls.Add(label, 0, t.RowCount);
+        t.SetColumnSpan(label, 2);
         t.RowCount++;
     }
 
     private static void AddRow(TableLayoutPanel t, string label, Control control) => AddLabeledControl(t, label, control);
 
-    private static void AddLabeledControl(TableLayoutPanel t, string label, Control control)
+    private static void AddLabeledControl(TableLayoutPanel layoutPanel, string label, Control control)
     {
-        t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Color.Gainsboro }, 0, t.RowCount);
-        t.Controls.Add(control, 1, t.RowCount);
-        t.RowCount++;
+        layoutPanel.Controls.Add(new Label
+        {
+            Text = label,
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            ForeColor = Color.Gainsboro
+        }, 0, layoutPanel.RowCount);
+
+        layoutPanel.Controls.Add(control, 1, layoutPanel.RowCount);
+        layoutPanel.RowCount++;
     }
 
-    private static void AddControl(TableLayoutPanel t, Control control)
+    private static void AddControl(TableLayoutPanel layoutPanel, Control control)
     {
-        t.Controls.Add(control, 0, t.RowCount);
-        t.SetColumnSpan(control, 2);
-        t.RowCount++;
+        layoutPanel.Controls.Add(control, 0, layoutPanel.RowCount);
+        layoutPanel.SetColumnSpan(control, 2);
+        layoutPanel.RowCount++;
     }
 }

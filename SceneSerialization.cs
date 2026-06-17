@@ -181,9 +181,17 @@ internal sealed partial class GlPanel
         _zeroG = dto.ZeroGravity;
         _waterOn = dto.WaterOn || _world.Waters.Count > 0;
         _world.Gravity = _zeroG ? Vector3.Zero : dto.Gravity;
-        if (_world.Gravity.LengthSquared() < 1e-6f && !_zeroG) _world.Gravity = DefaultGravity;
 
-        foreach (var b in _world.Bodies) b.Wake();
+        if (_world.Gravity.LengthSquared() < 1e-6f && !_zeroG)
+        {
+            _world.Gravity = DefaultGravity;
+        }
+
+        foreach (RigidBody body in _world.Bodies)
+        {
+            body.Wake();
+        }
+
         NotifyStateChanged();
         StatusUpdated?.Invoke($"Loaded scene: {loadedBodies.Count} object(s), {_world.Joints.Count} link(s).");
     }

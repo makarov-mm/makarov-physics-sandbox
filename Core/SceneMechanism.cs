@@ -7,6 +7,7 @@ public sealed class SceneMechanism
 {
     public string Id = SceneId.New("mechanism");
     public string Name = "Mechanism";
+
     public string DisplayName
     {
         get => string.IsNullOrWhiteSpace(Name) ? Id : Name;

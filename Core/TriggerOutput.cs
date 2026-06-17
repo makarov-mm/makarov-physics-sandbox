@@ -2,8 +2,8 @@
 
 public sealed class TriggerOutput
 {
-    public string TargetId = "";
-    public string TargetName = "";
+    public string TargetId = string.Empty;
+    public string TargetName = string.Empty;
     public TriggerActionKind Action = TriggerActionKind.Explosion;
     public float Delay;
     public float Radius = 5.0f;

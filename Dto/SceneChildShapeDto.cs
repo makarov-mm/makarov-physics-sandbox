@@ -27,6 +27,7 @@ public sealed class SceneChildShapeDto
         if (!Enum.TryParse<ShapeType>(Shape, out var shape)) shape = ShapeType.Box;
         Quaternion q = LocalRot;
         if (q == default) q = Quaternion.Identity;
+
         return new ChildShape
         {
             Shape = shape,

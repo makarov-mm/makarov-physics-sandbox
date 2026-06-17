@@ -10,9 +10,9 @@ internal static class QuaternionExt
     // Transform(v, Mul(p, c)) == Transform(Transform(v, c), p).
     public static Quaternion Multiply(this Quaternion a, Quaternion b)
     {
-        var av = new Vector3(a.X, a.Y, a.Z);
-        var bv = new Vector3(b.X, b.Y, b.Z);
-        var v = a.W * bv + b.W * av + Vector3.Cross(av, bv);
+        Vector3 av = new Vector3(a.X, a.Y, a.Z);
+        Vector3 bv = new Vector3(b.X, b.Y, b.Z);
+        Vector3 v = a.W * bv + b.W * av + Vector3.Cross(av, bv);
         return new Quaternion(v.X, v.Y, v.Z, a.W * b.W - Vector3.Dot(av, bv));
     }
 }

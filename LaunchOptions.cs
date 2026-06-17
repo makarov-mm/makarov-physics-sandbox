@@ -5,7 +5,6 @@ public sealed class LaunchOptions
     public bool PlayMode { get; init; }
     public bool ShowStartScreen { get; init; }
     public string? Preset { get; init; }
-
     public static LaunchOptions Default { get; } = new();
 
     public static LaunchOptions Parse(string[] args)

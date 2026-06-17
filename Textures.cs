@@ -31,12 +31,14 @@ internal static class Textures
     private static float Fbm(float x, float y, int seed, int octaves = 4)
     {
         float sum = 0f, amp = 0.5f, freq = 1f;
+
         for (int i = 0; i < octaves; i++)
         {
             sum += amp * Noise(x * freq, y * freq, seed + i * 131);
             amp *= 0.5f;
             freq *= 2f;
         }
+
         return sum;
     }
 
@@ -300,6 +302,7 @@ internal static class Textures
             return (c, c, c);
         }), size);
     }
+
     /// <summary>Gameplay balls: scuffed rubber/painted surface with subtle panel seams.</summary>
     public static uint CreateBall(int size = 256)
     {
@@ -342,19 +345,20 @@ internal static class Textures
             float cols = 8f;
             float xF = (u + (row % 2) * 0.5f / cols) * cols;
             float x = xF - MathF.Floor(xF);
-
             bool mortar = x < 0.045f || x > 0.955f || y < 0.060f || y > 0.940f;
             float rough = Fbm(u * 34f, v * 34f, 401, 5);
             float shade = 0.78f + (rough - 0.5f) * 0.24f;
+
             if (mortar)
             {
                 float m = 0.34f + (rough - 0.5f) * 0.08f;
                 return (m, m * 1.02f, m * 1.06f);
             }
+
             float r = 0.56f * shade;
             float g = 0.37f * shade;
             float b = 0.27f * shade;
-            return (Math.Clamp(r,0f,1f), Math.Clamp(g,0f,1f), Math.Clamp(b,0f,1f));
+            return (Math.Clamp(r,0f,1f), Math.Clamp(g, 0f, 1f), Math.Clamp(b, 0f, 1f));
         }), size);
     }
 
@@ -416,7 +420,6 @@ internal static class Textures
         }), size);
     }
 
-
     public static uint WoodCrateAlbedo() => LoadOrCreate("wood_crate_albedo.png", () => CreateCrate());
     public static uint WoodCrateBump() => LoadOrCreate("wood_crate_bump.png", () => CreateCrate());
     public static uint CartWoodAlbedo() => LoadOrCreate("cart_wood_albedo.png", () => CreateCrate());
@@ -435,5 +438,4 @@ internal static class Textures
     public static uint VehiclePaintBump() => LoadOrCreate("vehicle_paint_bump.png", () => CreateVehiclePaint());
     public static uint TireAlbedo() => LoadOrCreate("tire_albedo.png", () => CreateTire());
     public static uint TireBump() => LoadOrCreate("tire_bump.png", () => CreateTire());
-
 }

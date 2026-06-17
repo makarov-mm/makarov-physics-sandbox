@@ -139,6 +139,7 @@ internal sealed partial class GlPanel
                 m.Position = body.Position;
                 if (m.MotorAxis.LengthSquared() < 1e-6f) m.MotorAxis = Vector3.UnitZ;
             }
+
             _mechanisms.Add(m);
         }
     }

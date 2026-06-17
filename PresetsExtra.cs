@@ -117,18 +117,24 @@ internal sealed partial class GlPanel
         // A two-high barricade of dry wooden crates spanning the lane. The near edge starts burning immediately
         // so the preset reads within a few seconds instead of waiting for a tiny ignition core to maybe catch.
         for (int z = -3; z <= 3; z++)
-        for (int y = 0; y < 2; y++)
         {
-            var crate = WithMaterial(
-                MakeBreakable(RigidBody.CreateBox(new Vector3(-0.5f, 0.4f + y * 0.72f, z * 0.74f), new Vector3(0.34f), density: 0.6f), threshold: 4.0f),
-                MaterialId.Wood);
-            crate.Flammability = 1.65f;
-            AddBody(crate, crate.Color);
-            if (z <= -2 && y == 0) _heat.Ignite(crate);
+            for (int y = 0; y < 2; y++)
+            {
+                RigidBody crate = WithMaterial(
+                    MakeBreakable(RigidBody.CreateBox(new Vector3(-0.5f, 0.4f + y * 0.72f, z * 0.74f), new Vector3(0.34f), density: 0.6f), threshold: 4.0f),
+                    MaterialId.Wood);
+                crate.Flammability = 1.65f;
+                AddBody(crate, crate.Color);
+
+                if (z <= -2 && y == 0)
+                {
+                    _heat.Ignite(crate);
+                }
+            }
         }
 
         // Small hot starter marker on the burning side.
-        var core = WithMaterial(RigidBody.CreateSphere(new Vector3(-0.5f, 0.42f, -3.15f), 0.22f, density: 1.0f), MaterialId.Explosive);
+        RigidBody core = WithMaterial(RigidBody.CreateSphere(new Vector3(-0.5f, 0.42f, -3.15f), 0.22f, density: 1.0f), MaterialId.Explosive);
         core.ExplosivePower = 0.15f; // tiny: a lighter, not a bomb
         AddBody(core, core.Color);
         _heat.Ignite(core);

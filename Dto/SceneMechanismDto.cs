@@ -4,9 +4,9 @@ namespace MakarovPhysicsSandbox.Dto;
 
 public sealed class SceneMechanismDto
 {
-    public string Id { get; set; } = "";
+    public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = "Mechanism";
-    public string DisplayName { get; set; } = "";
+    public string DisplayName { get; set; } = string.Empty;
     public string Kind { get; set; } = "Timer";
     public Vector3 Position { get; set; } = new();
     public bool Enabled { get; set; } = true;

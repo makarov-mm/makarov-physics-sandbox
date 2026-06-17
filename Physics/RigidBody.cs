@@ -317,7 +317,8 @@ public sealed class RigidBody
     {
         for (int i = 0; i < Children.Length; i++)
         {
-            ref var c = ref Children[i];
+            ref ChildShape c = ref Children[i];
+
             Proxies[i] = new ShapeProxy
             {
                 Owner = this,

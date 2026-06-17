@@ -5,9 +5,9 @@ namespace MakarovPhysicsSandbox.Dto;
 
 public sealed class SceneTriggerDto
 {
-    public string Id { get; set; } = "";
+    public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = "Trigger";
-    public string DisplayName { get; set; } = "";
+    public string DisplayName { get; set; } = string.Empty;
     public Vector3 Position { get; set; }
     public Vector3 HalfExtents { get; set; } = new(0.9f, 0.08f, 0.9f);
     public string Action { get; set; } = nameof(TriggerActionKind.Explosion);

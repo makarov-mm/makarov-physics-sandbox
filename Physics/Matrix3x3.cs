@@ -9,7 +9,12 @@ public struct Matrix3x3
 
     public static readonly Matrix3x3 Zero = new();
 
-    public static Matrix3x3 Diagonal(Vector3 d) => new() { M00 = d.X, M11 = d.Y, M22 = d.Z };
+    public static Matrix3x3 Diagonal(Vector3 d) => new()
+    {
+        M00 = d.X,
+        M11 = d.Y,
+        M22 = d.Z
+    };
 
     public static Matrix3x3 FromQuaternion(Quaternion q)
     {
@@ -82,6 +87,7 @@ public struct Matrix3x3
         float c02 = M10 * M21 - M11 * M20;
         float det = M00 * c00 + M01 * c01 + M02 * c02;
         float inv = 1f / det;
+
         return new Matrix3x3
         {
             M00 = c00 * inv,

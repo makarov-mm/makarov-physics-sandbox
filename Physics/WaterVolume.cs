@@ -31,15 +31,21 @@ public sealed class WaterVolume
     public void Disturb(float x, float z, float strength)
     {
         if (_ripples.Count >= MAX_RIPPLES) _ripples.RemoveAt(0); // drop the oldest
-        _ripples.Add(new Ripple { X = x, Z = z, Start = Time, Strength = Math.Clamp(strength, 0.02f, 0.6f) });
-    }
 
-    public int RippleCount => _ripples.Count;
+        _ripples.Add(new Ripple
+        {
+            X = x, 
+            Z = z, 
+            Start = Time, 
+            Strength = Math.Clamp(strength, 0.02f, 0.6f)
+        });
+    }
 
     /// <summary>Fills dst with active ripples as (x, z, age, strength) quads; returns the count written.</summary>
     public int FillRipples(float[] dst, int maxQuads)
     {
         int n = 0;
+
         foreach (Ripple rp in _ripples)
         {
             if (n >= maxQuads) break;

@@ -308,7 +308,9 @@ internal static class Shaders
         GL.LinkProgram(program);
 
         if (GL.GetProgrami(program, GL.LINK_STATUS) == 0)
+        {
             throw new InvalidOperationException("Shader link failed:\n" + GL.GetProgramInfoLog(program));
+        }
 
         GL.DeleteShader(vs);
         GL.DeleteShader(fs);
@@ -322,7 +324,9 @@ internal static class Shaders
         GL.CompileShader(shader);
 
         if (GL.GetShaderi(shader, GL.COMPILE_STATUS) == 0)
+        {
             throw new InvalidOperationException($"{label} shader compile failed:\n" + GL.GetShaderInfoLog(shader));
+        }
 
         return shader;
     }

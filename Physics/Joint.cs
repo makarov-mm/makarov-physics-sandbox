@@ -29,10 +29,8 @@ public sealed class Joint
 
     public Vector3 WorldA => _worldA;
     public Vector3 WorldB => _worldB;
-
     private Vector3 VelA => A.Velocity + Vector3.Cross(A.AngularVelocity, _rA);
     private Vector3 VelB => B == null ? Vector3.Zero : B.Velocity + Vector3.Cross(B.AngularVelocity, _rB);
-
     public bool Involves(RigidBody body) => A == body || B == body;
 
     public void WakePair()
@@ -45,6 +43,7 @@ public sealed class Joint
     {
         _rA = Vector3.Transform(LocalA, A.Rotation);
         _worldA = A.Position + _rA;
+
         if (B != null)
         {
             _rB = Vector3.Transform(LocalB, B.Rotation);
@@ -59,14 +58,14 @@ public sealed class Joint
         if (Type == Kind.Point)
         {
             // K = invMassSum*I - skew(rA) IinvA skew(rA) - skew(rB) IinvB skew(rB)
-            var k = Matrix3x3.Diagonal(new Vector3(InvMassSum()));
+            Matrix3x3 k = Matrix3x3.Diagonal(new Vector3(InvMassSum()));
             k = Matrix3x3.Add(k, SkewInertiaTerm(A, _rA));
             if (B is { IsStatic: false }) k = Matrix3x3.Add(k, SkewInertiaTerm(B, _rB));
             _kInv = k.Inverse();
         }
         else
         {
-            var d = _worldB - _worldA;
+            Vector3 d = _worldB - _worldA;
             float len = d.Length();
             _axis = len > 1e-5f ? d / len : Vector3.UnitY;
             _axisMass = 1f / EffMassAlong(_axis);
@@ -80,9 +79,9 @@ public sealed class Joint
         if (Type == Kind.Point)
         {
             var c = _worldB - _worldA;
-            var vrel = VelB - VelA;
-            var rhs = -(vrel + c * (beta / h));
-            var impulse = _kInv.Transform(rhs);
+            Vector3 vrel = VelB - VelA;
+            Vector3 rhs = -(vrel + c * (beta / h));
+            Vector3 impulse = _kInv.Transform(rhs);
             ApplyImpulse(impulse);
         }
         else
@@ -121,22 +120,24 @@ public sealed class Joint
         }
     }
 
-    private float InvMassSum()
-        => (A.IsStatic ? 0f : A.InvMass) + (B is { IsStatic: false } ? B.InvMass : 0f);
+    private float InvMassSum() => (A.IsStatic ? 0f : A.InvMass) + (B is { IsStatic: false } ? B.InvMass : 0f);
 
     private float EffMassAlong(Vector3 n)
     {
         float k = 1e-6f;
+
         if (!A.IsStatic)
         {
             var rn = Vector3.Cross(_rA, n);
             k += A.InvMass + Vector3.Dot(Vector3.Cross(A.InvInertiaWorld.Transform(rn), _rA), n);
         }
+
         if (B is { IsStatic: false })
         {
             var rn = Vector3.Cross(_rB, n);
             k += B.InvMass + Vector3.Dot(Vector3.Cross(B.InvInertiaWorld.Transform(rn), _rB), n);
         }
+
         return k;
     }
 

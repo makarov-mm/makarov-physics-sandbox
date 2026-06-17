@@ -114,18 +114,19 @@ internal sealed class Mesh
     /// barrels, wheels and prop handles so they read as real cylinders, not capsules/spheres.</summary>
     public static Mesh CreateCylinder(int sectors = 32)
     {
-        var verts = new List<float>();
+        var vertices = new List<float>();
         var idx = new List<uint>();
 
         void V(float px, float py, float pz, float nx, float ny, float nz, float u, float v)
         {
-            verts.Add(px); verts.Add(py); verts.Add(pz);
-            verts.Add(nx); verts.Add(ny); verts.Add(nz);
-            verts.Add(u); verts.Add(v);
+            vertices.Add(px); vertices.Add(py); vertices.Add(pz);
+            vertices.Add(nx); vertices.Add(ny); vertices.Add(nz);
+            vertices.Add(u); vertices.Add(v);
         }
 
         // side wall: per sector a bottom (y=-1) and top (y=+1) vertex, radial normals
-        uint side = (uint)(verts.Count / 8);
+        uint side = (uint)(vertices.Count / 8);
+
         for (int j = 0; j <= sectors; j++)
         {
             float th = 2f * MathF.PI * j / sectors;
@@ -134,6 +135,7 @@ internal sealed class Mesh
             V(x, -1, z, x, 0, z, u, 0f); // bottom
             V(x,  1, z, x, 0, z, u, 1f); // top
         }
+
         for (int j = 0; j < sectors; j++)
         {
             uint b0 = side + (uint)(j * 2), t0 = b0 + 1, b1 = b0 + 2, t1 = b0 + 3;
@@ -142,30 +144,43 @@ internal sealed class Mesh
         }
 
         // top cap (+Y)
-        uint topC = (uint)(verts.Count / 8);
+        uint topC = (uint)(vertices.Count / 8);
         V(0, 1, 0, 0, 1, 0, 0.5f, 0.5f);
-        uint topR = (uint)(verts.Count / 8);
+        uint topR = (uint)(vertices.Count / 8);
+
         for (int j = 0; j <= sectors; j++)
         {
             float th = 2f * MathF.PI * j / sectors;
             float x = MathF.Cos(th), z = MathF.Sin(th);
             V(x, 1, z, 0, 1, 0, 0.5f + 0.5f * x, 0.5f + 0.5f * z);
         }
-        for (int j = 0; j < sectors; j++) { idx.Add(topC); idx.Add(topR + (uint)j + 1); idx.Add(topR + (uint)j); }
+
+        for (int j = 0; j < sectors; j++)
+        {
+            idx.Add(topC); idx.Add(topR + (uint)j + 1); 
+            idx.Add(topR + (uint)j);
+        }
 
         // bottom cap (-Y)
-        uint botC = (uint)(verts.Count / 8);
+        uint botC = (uint)(vertices.Count / 8);
         V(0, -1, 0, 0, -1, 0, 0.5f, 0.5f);
-        uint botR = (uint)(verts.Count / 8);
+        uint botR = (uint)(vertices.Count / 8);
+
         for (int j = 0; j <= sectors; j++)
         {
             float th = 2f * MathF.PI * j / sectors;
             float x = MathF.Cos(th), z = MathF.Sin(th);
             V(x, -1, z, 0, -1, 0, 0.5f + 0.5f * x, 0.5f + 0.5f * z);
         }
-        for (int j = 0; j < sectors; j++) { idx.Add(botC); idx.Add(botR + (uint)j); idx.Add(botR + (uint)j + 1); }
 
-        return new Mesh(verts.ToArray(), idx.ToArray());
+        for (int j = 0; j < sectors; j++)
+        {
+            idx.Add(botC); 
+            idx.Add(botR + (uint)j); 
+            idx.Add(botR + (uint)j + 1);
+        }
+
+        return new Mesh(vertices.ToArray(), idx.ToArray());
     }
 
     /// <summary>Unit quad at y = 0, normal up; scale it at draw time.</summary>
@@ -178,7 +193,7 @@ internal sealed class Mesh
         const float R = 0.5f;
         const float H = 0.8f; // = R * 1.6
 
-        var verts = new List<float>();
+        var vertices = new List<float>();
         var idx = new List<uint>();
 
         // rings from bottom pole to top pole:
@@ -192,9 +207,9 @@ internal sealed class Mesh
                 float x = ringR * MathF.Cos(a);
                 float z = ringR * MathF.Sin(a);
                 var n = Vector3.Normalize(new Vector3(x, y - nyCenterY, z));
-                verts.Add(x); verts.Add(y); verts.Add(z);
-                verts.Add(n.X); verts.Add(n.Y); verts.Add(n.Z);
-                verts.Add((float)j / sectors); verts.Add((y + H + R) / (2f * (H + R)));
+                vertices.Add(x); vertices.Add(y); vertices.Add(z);
+                vertices.Add(n.X); vertices.Add(n.Y); vertices.Add(n.Z);
+                vertices.Add((float)j / sectors); vertices.Add((y + H + R) / (2f * (H + R)));
             }
         }
 
@@ -206,6 +221,7 @@ internal sealed class Mesh
             float r = R * MathF.Sin(phi);
             Ring(y, r, -H);
         }
+
         // top hemisphere (center at y = +H)
         for (int i = 0; i <= capStacks; i++)
         {
@@ -217,7 +233,9 @@ internal sealed class Mesh
 
         int ringCount = 2 * (capStacks + 1);
         int stride = sectors + 1;
+
         for (int i = 0; i < ringCount - 1; i++)
+        {
             for (int j = 0; j < sectors; j++)
             {
                 uint a = (uint)(i * stride + j);
@@ -226,41 +244,42 @@ internal sealed class Mesh
                 idx.Add(a); idx.Add(b); idx.Add(a + 1);
                 idx.Add(a + 1); idx.Add(b); idx.Add(b + 1);
             }
+        }
 
-        return new Mesh(verts.ToArray(), idx.ToArray());
+        return new Mesh(vertices.ToArray(), idx.ToArray());
     }
 
     /// <summary>Unit quad in the local XY plane ([-0.5,0.5], normal +Z, UV 0..1). Used for
     /// camera-facing billboard particles (fire/smoke), oriented via a billboard model matrix.</summary>
     public static Mesh CreateBillboardQuad()
     {
-        float[] verts =
-        {
+        float[] vertices =
+        [
             -0.5f, -0.5f, 0,  0, 0, 1,  0, 0,
              0.5f, -0.5f, 0,  0, 0, 1,  1, 0,
              0.5f,  0.5f, 0,  0, 0, 1,  1, 1,
-            -0.5f,  0.5f, 0,  0, 0, 1,  0, 1,
-        };
-        uint[] idx = { 0, 1, 2, 0, 2, 3 };
-        return new Mesh(verts, idx);
+            -0.5f,  0.5f, 0,  0, 0, 1,  0, 1
+        ];
+        uint[] idx = [0, 1, 2, 0, 2, 3];
+        return new Mesh(vertices, idx);
     }
 
     public static Mesh CreatePlane()
     {
         float[] verts =
-        {
+        [
             -1, 0, -1,  0, 1, 0,  0, 0,
              1, 0, -1,  0, 1, 0,  1, 0,
              1, 0,  1,  0, 1, 0,  1, 1,
-            -1, 0,  1,  0, 1, 0,  0, 1,
-        };
-        uint[] idx = { 0, 2, 1, 0, 3, 2 }; // CCW seen from above (+Y)
+            -1, 0,  1,  0, 1, 0,  0, 1
+        ];
+        uint[] idx = [0, 2, 1, 0, 3, 2]; // CCW seen from above (+Y)
         return new Mesh(verts, idx);
     }
     /// <summary>Tessellated unit quad at y = 0, normal up. Used for the animated water surface.</summary>
     public static Mesh CreateGridPlane(int cells = 64)
     {
-        var verts = new List<float>();
+        var vertices = new List<float>();
         var idx = new List<uint>();
 
         for (int z = 0; z <= cells; z++)
@@ -269,24 +288,27 @@ internal sealed class Mesh
             for (int x = 0; x <= cells; x++)
             {
                 float vx = -1f + 2f * x / cells;
-                verts.Add(vx); verts.Add(0f); verts.Add(vz);
-                verts.Add(0f); verts.Add(1f); verts.Add(0f);
-                verts.Add((float)x / cells); verts.Add((float)z / cells);
+                vertices.Add(vx); vertices.Add(0f); vertices.Add(vz);
+                vertices.Add(0f); vertices.Add(1f); vertices.Add(0f);
+                vertices.Add((float)x / cells); vertices.Add((float)z / cells);
             }
         }
 
         int stride = cells + 1;
+
         for (int z = 0; z < cells; z++)
-        for (int x = 0; x < cells; x++)
         {
-            uint a = (uint)(z * stride + x);
-            uint b = a + 1;
-            uint c = (uint)((z + 1) * stride + x);
-            uint d = c + 1;
-            idx.Add(a); idx.Add(d); idx.Add(b);
-            idx.Add(a); idx.Add(c); idx.Add(d);
+            for (int x = 0; x < cells; x++)
+            {
+                uint a = (uint)(z * stride + x);
+                uint b = a + 1;
+                uint c = (uint)((z + 1) * stride + x);
+                uint d = c + 1;
+                idx.Add(a); idx.Add(d); idx.Add(b);
+                idx.Add(a); idx.Add(c); idx.Add(d);
+            }
         }
 
-        return new Mesh(verts.ToArray(), idx.ToArray());
+        return new Mesh(vertices.ToArray(), idx.ToArray());
     }
 }
