@@ -117,8 +117,8 @@ public sealed class WaterVolume
         // spawn a ripple when a body crosses / churns the surface (throttled per body)
         if (b.RippleCooldown <= 0f && MathF.Abs(b.Position.Y - surfaceY) < r + 0.15f)
         {
-            float horiz = MathF.Sqrt(b.Velocity.X * b.Velocity.X + b.Velocity.Z * b.Velocity.Z);
-            float speed = MathF.Abs(b.Velocity.Y) + 0.35f * horiz;
+            float horizontal = MathF.Sqrt(b.Velocity.X * b.Velocity.X + b.Velocity.Z * b.Velocity.Z);
+            float speed = MathF.Abs(b.Velocity.Y) + 0.35f * horizontal;
 
             if (speed > 1.0f)
             {

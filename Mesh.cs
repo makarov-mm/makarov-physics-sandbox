@@ -183,7 +183,54 @@ internal sealed class Mesh
         return new Mesh(vertices.ToArray(), idx.ToArray());
     }
 
-    /// <summary>Unit quad at y = 0, normal up; scale it at draw time.</summary>
+    // Unit cone: base ring at y = -1 (radius 1), apex at y = +1. Scale it at draw time.
+    // Used for spike-platform spikes; backface culling is disabled by the caller so winding is not critical.
+    public static Mesh CreateCone(int sectors = 18)
+    {
+        var vertices = new List<float>();
+        var idx = new List<uint>();
+
+        void V(float px, float py, float pz, float nx, float ny, float nz, float u, float v)
+        {
+            vertices.Add(px); vertices.Add(py); vertices.Add(pz);
+            vertices.Add(nx); vertices.Add(ny); vertices.Add(nz);
+            vertices.Add(u); vertices.Add(v);
+        }
+
+        // side: base rim -> apex, two vertices per sector
+        uint side = (uint)(vertices.Count / 8);
+        for (int j = 0; j <= sectors; j++)
+        {
+            float th = 2f * MathF.PI * j / sectors;
+            float x = MathF.Cos(th), z = MathF.Sin(th);
+            var n = Vector3.Normalize(new Vector3(2f * x, 1f, 2f * z));   // slope normal for height 2 / radius 1
+            float u = (float)j / sectors;
+            V(x, -1, z, n.X, n.Y, n.Z, u, 0f);   // base rim
+            V(0,  1, 0, n.X, n.Y, n.Z, u, 1f);   // apex
+        }
+        for (int j = 0; j < sectors; j++)
+        {
+            uint b0 = side + (uint)(j * 2), a0 = b0 + 1, b1 = b0 + 2;
+            idx.Add(b0); idx.Add(a0); idx.Add(b1);
+        }
+
+        // base cap (-Y)
+        uint capC = (uint)(vertices.Count / 8);
+        V(0, -1, 0, 0, -1, 0, 0.5f, 0.5f);
+        uint capR = (uint)(vertices.Count / 8);
+        for (int j = 0; j <= sectors; j++)
+        {
+            float th = 2f * MathF.PI * j / sectors;
+            float x = MathF.Cos(th), z = MathF.Sin(th);
+            V(x, -1, z, 0, -1, 0, 0.5f + 0.5f * x, 0.5f + 0.5f * z);
+        }
+        for (int j = 0; j < sectors; j++)
+        {
+            idx.Add(capC); idx.Add(capR + (uint)j + 1); idx.Add(capR + (uint)j);
+        }
+
+        return new Mesh(vertices.ToArray(), idx.ToArray());
+    }
     /// <summary>
     /// Capsule: radius 0.5, cylindrical half-height 0.8 (axis = Y).
     /// Proportion matches RigidBody.CapsuleHalfHeightPerRadius; scale uniformly.

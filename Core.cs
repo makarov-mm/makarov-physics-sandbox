@@ -89,7 +89,7 @@ internal sealed partial class GlPanel : Control
 
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
-    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _planeMesh = null!, _waterMesh = null!, _quadMesh = null!;
+    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _coneMesh = null!, _planeMesh = null!, _waterMesh = null!, _quadMesh = null!;
     private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal, _texBeachBall, _texMetalCube, _texGasCylinder, _texSoftParticle;
     private uint _bumpCrate, _bumpBrick, _bumpCartWood, _bumpRustyMetal, _bumpBall, _bumpBowlingPin, _bumpGlass, _bumpVehicle, _bumpTire, _bumpBarrel, _bumpBeachBall, _bumpMetalCube, _bumpGasCylinder;
     private uint _shadowFbo, _shadowTex;
@@ -307,6 +307,8 @@ internal sealed partial class GlPanel : Control
     public void SpawnSpikePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SpikePlatform); Focus(); } }
     public void SpawnFirePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.FirePlatform); Focus(); } }
     public void SpawnSmokePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SmokePlatform); Focus(); } }
+    public void SpawnBottle() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Bottle); Focus(); } }
+    public void SpawnFireworkRocket() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.FireworkRocket); Focus(); } }
     public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
     public void Electrify()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Electrify); Focus(); } }
     public void Shoot()         { if (_initialized) { CancelPendingSceneAction(); ShootBall(); Focus(); } }
@@ -623,6 +625,7 @@ internal sealed partial class GlPanel : Control
         _electricity.Update(simDt, _world, _ragdolls);
         UpdateMaterialReactions(simDt);
         UpdateHazardPlatforms(simDt);
+        UpdateFireworks(simDt);
         UpdateDroneHover(simDt);
         SpawnFireEffects(simDt);
         SpawnElectricityEffects(simDt);
@@ -980,6 +983,7 @@ internal sealed partial class GlPanel : Control
         _sphereMesh = Mesh.CreateSphere();
         _capsuleMesh = Mesh.CreateCapsule();
         _cylinderMesh = Mesh.CreateCylinder();
+        _coneMesh = Mesh.CreateCone();
         _planeMesh = Mesh.CreatePlane();
         _waterMesh = Mesh.CreateGridPlane(64);
         _quadMesh = Mesh.CreateBillboardQuad();
@@ -2569,9 +2573,12 @@ internal sealed partial class GlPanel : Control
         ball.Color = Vector3.One;
         ball.Restitution = 0.92f;
         ball.Friction = 0.28f;
-        ball.Flammability = 0.08f;
+        ball.Flammability = 0.7f;       // thin skin, catches fire easily
+        ball.Breakable = true;
+        ball.BreakThreshold = 4.5f;     // a solid hit bursts it
+        ball.BreakPieces = 7;
         _world.Bodies.Add(ball);
-        StatusUpdated?.Invoke("Placed beach ball. Light, bouncy and buoyant.");
+        StatusUpdated?.Invoke("Placed beach ball. Light and bouncy, but it bursts when hit hard or set on fire.");
     }
 
     private void SpawnMetalCubeAtAim()
@@ -2725,6 +2732,40 @@ internal sealed partial class GlPanel : Control
         EvictIfFull();
         AddHazardPlatform("SmokePlatform", new Vector3(0.38f, 0.40f, 0.43f));
         StatusUpdated?.Invoke("Placed smoke platform. It steadily emits smoke.");
+    }
+
+    private void SpawnBottleAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.4f, 0f);
+        var bottle = WithMaterial(RigidBody.CreateCompound(p, [
+            ChildShape.Box(new Vector3(0.16f, 0.26f, 0.16f), new Vector3(0f, -0.08f, 0f)),   // body
+            ChildShape.Box(new Vector3(0.07f, 0.16f, 0.07f), new Vector3(0f,  0.30f, 0f)),   // neck
+        ], density: 1.1f), MaterialId.Glass);
+        bottle.Tag = "GlassBlock";                       // reuse glass material rendering
+        bottle.Color = new Vector3(0.45f, 0.78f, 0.52f); // green glass tint
+        bottle.Restitution = 0.10f;
+        bottle.Friction = 0.35f;
+        bottle.Breakable = true;
+        bottle.BreakThreshold = 2.2f;
+        bottle.BreakPieces = 14;
+        _world.Bodies.Add(bottle);
+        StatusUpdated?.Invoke("Placed glass bottle.");
+    }
+
+    private void SpawnFireworkRocketAtAim()
+    {
+        EvictIfFull();
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.5f, 0f);
+        var rocket = WithMaterial(RigidBody.CreateCapsule(p, 0.13f, density: 0.7f), MaterialId.Synthetic);
+        rocket.Tag = "FireworkRocket";
+        rocket.Color = new Vector3(0.90f, 0.16f, 0.16f);
+        rocket.Friction = 0.5f;
+        rocket.Restitution = 0.10f;
+        rocket.Flammability = 1.0f;     // light it with the Ignite tool to launch
+        rocket.Breakable = false;
+        _world.Bodies.Add(rocket);
+        StatusUpdated?.Invoke("Placed firework rocket. Ignite it to launch, then it bursts.");
     }
 
     private void SpawnWreckingBallTargetAtAim()
@@ -3121,6 +3162,12 @@ internal sealed partial class GlPanel : Control
             case PendingSceneActionKind.SmokePlatform:
                 SpawnSmokePlatformAtAim();
                 break;
+            case PendingSceneActionKind.Bottle:
+                SpawnBottleAtAim();
+                break;
+            case PendingSceneActionKind.FireworkRocket:
+                SpawnFireworkRocketAtAim();
+                break;
             case PendingSceneActionKind.SentinelBot:
                 SpawnSentinelBotAtAim();
                 break;
@@ -3215,6 +3262,8 @@ internal sealed partial class GlPanel : Control
         PendingSceneActionKind.SpikePlatform => "spike platform",
         PendingSceneActionKind.FirePlatform => "fire platform",
         PendingSceneActionKind.SmokePlatform => "smoke platform",
+        PendingSceneActionKind.Bottle => "glass bottle",
+        PendingSceneActionKind.FireworkRocket => "firework rocket",
         _ => "tool",
     };
 
@@ -3532,9 +3581,15 @@ internal sealed partial class GlPanel : Control
         // Explicit material gameplay: explosive objects can detonate from heat, fire,
         // electricity or extreme impacts. This no longer guesses from UI values.
         List<RigidBody>? detonate = null;
+        List<RigidBody>? pop = null;
         foreach (var b in _world.Bodies)
         {
             if (b.IsStatic || !b.UserObject) continue;
+
+            // A burning beach ball bursts shortly after it catches fire.
+            if (b.Burning && b.Breakable && (b.Tag as string) == "BeachBall")
+                (pop ??= new List<RigidBody>()).Add(b);
+
             if (b.ExplosivePower <= 0f) continue;
 
             bool hot = b.Burning || b.Temperature > 230f;
@@ -3542,6 +3597,11 @@ internal sealed partial class GlPanel : Control
             bool hardHit = b != _world.Grabbed && b.Velocity.LengthSquared() > 70f;
             if (hot || shocked || hardHit) (detonate ??= new List<RigidBody>()).Add(b);
         }
+
+        if (pop != null)
+            foreach (var b in pop)
+                if (_world.Bodies.Contains(b))
+                    _world.FractureBody(b, b.Position, Vector3.UnitY, b.BreakThreshold + 6f);
 
         if (detonate == null) return;
         foreach (var b in detonate)
@@ -3602,6 +3662,20 @@ internal sealed partial class GlPanel : Control
                 continue;
             }
 
+            // Fire platform burns continuously, with or without anything on it.
+            if (tag == "FirePlatform" && emitSmoke)
+                for (int i = 0; i < 4; i++)
+                {
+                    var off = new Vector3(((float)_rng.NextDouble() - 0.5f) * he.X * 1.5f, 0f,
+                                          ((float)_rng.NextDouble() - 0.5f) * he.Z * 1.5f);
+                    var vel = new Vector3(((float)_rng.NextDouble() - 0.5f) * 0.4f,
+                                          1.4f + (float)_rng.NextDouble() * 1.6f,
+                                          ((float)_rng.NextDouble() - 0.5f) * 0.4f);
+                    AddParticle(plat.Position + new Vector3(0f, he.Y + 0.05f, 0f) + off, vel,
+                                new Vector3(1.0f, 0.32f + (float)_rng.NextDouble() * 0.45f, 0.05f),
+                                0.28f + (float)_rng.NextDouble() * 0.18f, 0.11f + (float)_rng.NextDouble() * 0.05f, false);
+                }
+
             // Fire / spike: collect dynamic user bodies resting on the slab footprint.
             List<RigidBody>? hits = null;
             foreach (var b in _world.Bodies)
@@ -3628,6 +3702,74 @@ internal sealed partial class GlPanel : Control
                         _world.FractureBody(b, b.Position, Vector3.UnitY, b.BreakThreshold + 4f);
             }
         }
+    }
+
+    private readonly Dictionary<RigidBody, float> _fireworkFuse = new();
+
+    // Firework rockets: once lit, they thrust upward for a short burn, then burst into colored sparks.
+    private void UpdateFireworks(float dt)
+    {
+        if (dt <= 0f) return;
+
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic || (b.Tag as string) != "FireworkRocket") continue;
+            if (b.Burning && !_fireworkFuse.ContainsKey(b)) _fireworkFuse[b] = 0f;
+        }
+        if (_fireworkFuse.Count == 0) return;
+
+        const float burnTime = 0.9f;
+        List<RigidBody>? boom = null;
+        List<RigidBody>? stale = null;
+        foreach (var kv in _fireworkFuse)
+        {
+            var b = kv.Key;
+            if (!_world.Bodies.Contains(b)) { (stale ??= new List<RigidBody>()).Add(b); continue; }
+            float t = kv.Value + dt;
+            _fireworkFuse[b] = t;
+            if (t < burnTime)
+            {
+                // climb roughly straight up, not very high before it pops
+                b.Velocity = new Vector3(b.Velocity.X * 0.95f, b.Velocity.Y + 20f * dt, b.Velocity.Z * 0.95f);
+                b.Wake();
+            }
+            else (boom ??= new List<RigidBody>()).Add(b);
+        }
+
+        if (stale != null) foreach (var b in stale) _fireworkFuse.Remove(b);
+        if (boom != null)
+            foreach (var b in boom)
+            {
+                ExplodeFirework(b.Position);
+                _world.RemoveBody(b);
+                _world.Joints.RemoveAll(j => j.Involves(b));
+                if (_selectedBody == b) SelectBody(null);
+                _fireworkFuse.Remove(b);
+            }
+    }
+
+    private void ExplodeFirework(Vector3 center)
+    {
+        Vector3[] palette =
+        [
+            new Vector3(1.0f, 0.25f, 0.25f),
+            new Vector3(0.30f, 0.60f, 1.0f),
+            new Vector3(0.40f, 1.0f, 0.45f),
+            new Vector3(1.0f, 0.85f, 0.30f),
+            new Vector3(1.0f, 0.40f, 0.90f),
+        ];
+        var col = palette[_rng.Next(palette.Length)];
+        for (int i = 0; i < 40 && _particles.Count < MaxParticles; i++)
+        {
+            var dir = RandomUnit();
+            float speed = 4.5f + (float)_rng.NextDouble() * 4.5f;
+            AddParticle(center, dir * speed + new Vector3(0f, 1.2f, 0f),
+                        col * (0.7f + (float)_rng.NextDouble() * 0.5f),
+                        0.8f + (float)_rng.NextDouble() * 0.7f,
+                        0.07f + (float)_rng.NextDouble() * 0.05f, true);
+        }
+        ApplyExplosionAt(center, 1.6f, 2.0f);   // gentle celebratory pop, not destructive
+        PlayExplosionSound();
     }
 
 
@@ -5023,6 +5165,13 @@ internal sealed partial class GlPanel : Control
                 GL.Uniform1(_uEmissive, MathF.Max(electricGlow, 0.25f));
             }
 
+            // Fire platform always reads as hot, even with nothing on it.
+            if ((b.Tag as string) == "FirePlatform")
+            {
+                color = new Vector3(0.85f, 0.32f, 0.10f);
+                GL.Uniform1(_uEmissive, 0.65f);
+            }
+
             GL.Uniform3(_uColor, color.X, color.Y, color.Z);
 
             foreach (ref var child in b.Children.AsSpan())
@@ -5070,6 +5219,7 @@ internal sealed partial class GlPanel : Control
                 }
                 if (b.IsStatic) { GL.Uniform1(_uUvScale, 1f); GL.Uniform1(_uWorldUv, 0f); }
             }
+            if ((b.Tag as string) == "SpikePlatform") DrawSpikePlatformSpikes(b);
         }
         GL.Uniform1(_uEmissive, 0f);
         GL.Uniform1(_uBumpStrength, 0f);
@@ -5148,6 +5298,43 @@ internal sealed partial class GlPanel : Control
         GL.Uniform3(_uColor, 0.55f, 0.50f, 0.42f);
         GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(child.Radius * 0.28f) * Matrix4x4.CreateTranslation(center)));
         _sphereMesh.Draw();
+
+        GL.Uniform1(_uUseBumpMap, 0f);
+        GL.Uniform1(_uBumpStrength, 0f);
+    }
+
+    private void DrawSpikePlatformSpikes(RigidBody b)
+    {
+        var he = b.Children[0].HalfExtents;
+        float topY = b.Position.Y + he.Y;
+
+        GL.BindTexture(GL.TEXTURE_2D, _texRustyMetal);
+        GL.ActiveTexture(GL.TEXTURE2);
+        GL.BindTexture(GL.TEXTURE_2D, _bumpRustyMetal);
+        GL.Uniform1(_uUseBumpMap, 1f);
+        GL.ActiveTexture(GL.TEXTURE1);
+        GL.Uniform1(_uBumpStrength, 0.30f);
+        GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform3(_uColor, 0.66f, 0.68f, 0.72f);
+
+        const int n = 5;                 // n x n spike grid
+        const float spikeR = 0.10f;      // base radius
+        const float spikeH = 0.34f;      // height
+        float margin = spikeR * 1.4f;
+        float usableX = MathF.Max(0f, he.X - margin), usableZ = MathF.Max(0f, he.Z - margin);
+
+        GL.Disable(GL.CULL_FACE);        // cones are convex, so skip winding concerns
+        for (int ix = 0; ix < n; ix++)
+            for (int iz = 0; iz < n; iz++)
+            {
+                float fx = ix / (float)(n - 1) * 2f - 1f;
+                float fz = iz / (float)(n - 1) * 2f - 1f;
+                var pos = new Vector3(b.Position.X + fx * usableX, topY + spikeH * 0.5f, b.Position.Z + fz * usableZ);
+                var m = Matrix4x4.CreateScale(spikeR, spikeH * 0.5f, spikeR) * Matrix4x4.CreateTranslation(pos);
+                GL.UniformMatrix4(_uModel, ToArray(m));
+                _coneMesh.Draw();
+            }
+        GL.Enable(GL.CULL_FACE);
 
         GL.Uniform1(_uUseBumpMap, 0f);
         GL.Uniform1(_uBumpStrength, 0f);

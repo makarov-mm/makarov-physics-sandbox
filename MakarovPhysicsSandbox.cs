@@ -787,38 +787,44 @@ namespace MakarovPhysicsSandbox
                 Padding = new Padding(2),
             };
 
-            AddPlayerButton("Object", "catalog.png", "F6", ShowSpawnCatalog);
-            AddPlayerButton("Explosion", "explosion.png", "E", () => _gl.Detonate());
-            AddPlayerButton("Shoot", "shoot.png", "F", () => _gl.Shoot());
-            AddPlayerButton("Barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel());
-            AddPlayerButton("Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder());
-            AddPlayerButton("Gas", "gascylinder.png", "", () => _gl.SpawnGasCylinder());
-            AddPlayerButton("Beach", "beachball.png", "", () => _gl.SpawnBeachBall());
-            AddPlayerButton("Metal", "metalcube.png", "", () => _gl.SpawnMetalCube());
-            AddPlayerButton("Cart", "cart.png", "", () => _gl.SpawnWoodenCart());
-            AddPlayerButton("Glass", "glass.png", "", () => _gl.SpawnGlassBlock());
-            AddPlayerButton("Drone", "drone.png", "", () => _gl.SpawnDroneTarget());
-            AddPlayerButton("Target", "sentinel.png", "", () => _gl.SpawnSentinelBot());
+            AddPlayerButton("Sphere", "sphere.png", "1", () => _gl.Spawn(1));
+            AddPlayerButton("Box", "box.png", "2", () => _gl.Spawn(2));
+            AddPlayerButton("Metal cube", "metalcube.png", "", () => _gl.SpawnMetalCube());
+            AddPlayerButton("Glass cube", "glass.png", "", () => _gl.SpawnGlassCube());
+            AddPlayerButton("Plank", "plank.png", "4", () => _gl.Spawn(4));
+            AddPlayerButton("Pillar", "pillar.png", "5", () => _gl.Spawn(5));
+            AddPlayerButton("Dumbbell", "dumbbell.png", "6", () => _gl.Spawn(6));
+            AddPlayerButton("Hammer", "hammer.png", "7", () => _gl.Spawn(7));
+            AddPlayerButton("Table", "table.png", "8", () => _gl.Spawn(8));
+            AddPlayerButton("Bowling pins", "pins.png", "9", () => _gl.SpawnPins());
+            AddPlayerButton("Chain", "chain.png", "L", () => _gl.SpawnChain());
+            AddPlayerButton("Android dummy", "android.png", "0", () => _gl.SpawnAndroid());
+            AddPlayerButton("Drone target", "drone.png", "", () => _gl.SpawnDroneTarget());
+            AddPlayerButton("Target dummy", "sentinel.png", "", () => _gl.SpawnSentinelBot());
             AddPlayerButton("Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle());
-            AddPlayerButton("Police", "police.png", "", () => _gl.SpawnPoliceVehicle());
+            AddPlayerButton("Police car", "police.png", "", () => _gl.SpawnPoliceVehicle());
             AddPlayerButton("Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance());
-            AddPlayerButton("Android", "android.png", "0", () => _gl.SpawnAndroid());
-            AddPlayerButton("Bridge", "bridge.png", "", () => _gl.SpawnBridgeSpan());
-            AddPlayerButton("Catapult", "catapult.png", "", () => _gl.SpawnCatapultLauncher());
-            AddPlayerButton("Wrecking", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget());
-            AddPlayerButton("Fire", "torch.png", "I", () => _gl.Ignite());
-            AddPlayerButton("Shock", "electricity.png", "D", () => _gl.Electrify());
-            AddPlayerButton("Water", "water.png", "V", () => _gl.Water());
-            AddPlayerButton("Gravity", "gravity.png", "G", () => _gl.Gravity());
-            AddPlayerButton("Attract", "attractor.png", "", () => _gl.Attractor());
-            AddPlayerButton("Repel", "repeller.png", "", () => _gl.Repeller());
-            AddPlayerButton("Wind", "wind.png", "", () => _gl.Wind());
-            AddPlayerButton("Connect", "connect.png", "J", () => _gl.Connect());
-            AddPlayerButton("Spring", "spring.png", "K", () => _gl.Spring());
-            AddPlayerButton("Disconnect", "disconnect.png", "Del", () => _gl.Disconnect());
-            AddPlayerButton("Conveyor", "conveyor.png", "", () => _gl.SpawnConveyor());
-            AddPlayerButton("Piston", "piston.png", "", () => _gl.SpawnPiston());
-            AddPlayerButton("Door", "door.png", "", () => _gl.SpawnSlidingDoor());
+            AddPlayerButton("Bridge span", "bridge.png", "", () => _gl.SpawnBridgeSpan());
+            AddPlayerButton("Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher());
+            AddPlayerButton("Wooden cart", "cart.png", "", () => _gl.SpawnWoodenCart());
+            AddPlayerButton("Glass block", "glass.png", "", () => _gl.SpawnGlassBlock());
+            AddPlayerButton("Glass pyramid", "glass.png", "", () => _gl.SpawnGlassPyramid());
+            AddPlayerButton("Spike platform", "spikepad.png", "", () => _gl.SpawnSpikePlatform());
+            AddPlayerButton("Fire platform", "firepad.png", "", () => _gl.SpawnFirePlatform());
+            AddPlayerButton("Smoke platform", "smokepad.png", "", () => _gl.SpawnSmokePlatform());
+            AddPlayerButton("Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget());
+            AddPlayerButton("Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel());
+            AddPlayerButton("Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder());
+            AddPlayerButton("Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall());
+            AddPlayerButton("Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder());
+            AddPlayerButton("Glass bottle", "bottle.png", "", () => _gl.SpawnBottle());
+            AddPlayerButton("Firework rocket", "firework.png", "", () => _gl.SpawnFireworkRocket());
+            AddPlayerButton("Motor hinge", "motor.png", "", () => _gl.SpawnMotor());
+            AddPlayerButton("Gate", "gate.png", "", () => _gl.SpawnGate());
+            AddPlayerButton("Timer", "timer.png", "", () => _gl.SpawnTimer());
+            AddPlayerButton("Conveyor belt", "conveyor.png", "", () => _gl.SpawnConveyor());
+            AddPlayerButton("Piston actuator", "piston.png", "", () => _gl.SpawnPiston());
+            AddPlayerButton("Sliding door", "door.png", "", () => _gl.SpawnSlidingDoor());
 
             BuildPlayerTopBar();
             BuildPlayerPresetPanel();
@@ -1164,6 +1170,8 @@ namespace MakarovPhysicsSandbox
             AddToolbarButton(ts, "Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder(), placeOnScene: true);
             AddToolbarButton(ts, "Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall(), placeOnScene: true);
             AddToolbarButton(ts, "Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder(), placeOnScene: true);
+            AddToolbarButton(ts, "Glass bottle", "bottle.png", "", () => _gl.SpawnBottle(), placeOnScene: true);
+            AddToolbarButton(ts, "Firework rocket", "firework.png", "", () => _gl.SpawnFireworkRocket(), placeOnScene: true);
             AddToolbarButton(ts, "Motor hinge",   "motor.png",   "",  () => _gl.SpawnMotor(), placeOnScene: true);
             AddToolbarButton(ts, "Gate",          "gate.png",    "",  () => _gl.SpawnGate(), placeOnScene: true);
             AddToolbarButton(ts, "Timer",         "timer.png",   "",  () => _gl.SpawnTimer(), placeOnScene: true);
@@ -1310,8 +1318,6 @@ namespace MakarovPhysicsSandbox
             AddCatalogAction(basic.DropDownItems, "Table", "table.png", "8", () => _gl.Spawn(8), "Compound furniture prop");
             AddCatalogAction(basic.DropDownItems, "Bowling pins", "pins.png", "9", () => _gl.SpawnPins(), "Ready-made pin group");
             AddCatalogAction(basic.DropDownItems, "Chain", "chain.png", "L", () => _gl.SpawnChain(), "Linked physics chain");
-            AddCatalogAction(basic.DropDownItems, "Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall(), "Light bouncy toy ball");
-            AddCatalogAction(basic.DropDownItems, "Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder(), "Generic metal cylinder");
 
             var dummies = CatalogCategory("Dummies & vehicles");
             AddCatalogAction(dummies.DropDownItems, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), "Synthetic crash-test dummy");
@@ -1320,7 +1326,6 @@ namespace MakarovPhysicsSandbox
             AddCatalogAction(dummies.DropDownItems, "Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle(), "Simple crash-test vehicle rig");
             AddCatalogAction(dummies.DropDownItems, "Police car", "police.png", "", () => _gl.SpawnPoliceVehicle(), "Vehicle variant for crashes and bridge scenes");
             AddCatalogAction(dummies.DropDownItems, "Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance(), "Larger emergency vehicle variant");
-            AddCatalogAction(dummies.DropDownItems, "Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget(), "Heavy suspended impact target");
 
             var structures = CatalogCategory("Structures & launchers");
             AddCatalogAction(structures.DropDownItems, "Bridge span", "bridge.png", "", () => _gl.SpawnBridgeSpan(), "Jointed wooden bridge module");
@@ -1329,19 +1334,17 @@ namespace MakarovPhysicsSandbox
             AddCatalogAction(structures.DropDownItems, "Glass block", "glass.png", "", () => _gl.SpawnGlassBlock(), "Fragile glass object that shatters into shards");
             AddCatalogAction(structures.DropDownItems, "Glass pyramid", "glass.png", "", () => _gl.SpawnGlassPyramid(), "Tall four-sided glass pyramid, about 3x its base");
 
-            var hazards = CatalogCategory("Hazards & fields");
-            AddCatalogAction(hazards.DropDownItems, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), "Detonates from fire, shock or impact");
-            AddCatalogAction(hazards.DropDownItems, "Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder(), "Smaller explosive pressure vessel");
-            AddCatalogAction(hazards.DropDownItems, "Explosion", "explosion.png", "E", () => _gl.Detonate(), "Place an explosion at the aim point");
-            AddCatalogAction(hazards.DropDownItems, "Ignite", "torch.png", "I", () => _gl.Ignite(), "Set a body or place area on fire");
-            AddCatalogAction(hazards.DropDownItems, "Electrify", "electricity.png", "D", () => _gl.Electrify(), "Shock a body or conductive chain");
-            AddCatalogAction(hazards.DropDownItems, "Water", "water.png", "V", () => _gl.Water(), "Toggle water volume");
-            AddCatalogAction(hazards.DropDownItems, "Attractor", "attractor.png", "Z", () => _gl.Attractor(), "Place an attraction field");
-            AddCatalogAction(hazards.DropDownItems, "Repeller", "repeller.png", "X", () => _gl.Repeller(), "Place a repulsion field");
-            AddCatalogAction(hazards.DropDownItems, "Wind", "wind.png", "U", () => _gl.Wind(), "Place a directional wind field");
-            AddCatalogAction(hazards.DropDownItems, "Spike platform", "spikepad.png", "", () => _gl.SpawnSpikePlatform(), "Static pad that shreds breakable objects resting on it");
-            AddCatalogAction(hazards.DropDownItems, "Fire platform", "firepad.png", "", () => _gl.SpawnFirePlatform(), "Static pad that ignites flammable objects on it");
-            AddCatalogAction(hazards.DropDownItems, "Smoke platform", "smokepad.png", "", () => _gl.SpawnSmokePlatform(), "Static pad that steadily emits smoke");
+            var props = CatalogCategory("Hazards & props");
+            AddCatalogAction(props.DropDownItems, "Spike platform", "spikepad.png", "", () => _gl.SpawnSpikePlatform(), "Static pad that shreds breakable objects resting on it");
+            AddCatalogAction(props.DropDownItems, "Fire platform", "firepad.png", "", () => _gl.SpawnFirePlatform(), "Static pad that burns and ignites flammable objects on it");
+            AddCatalogAction(props.DropDownItems, "Smoke platform", "smokepad.png", "", () => _gl.SpawnSmokePlatform(), "Static pad that steadily emits smoke");
+            AddCatalogAction(props.DropDownItems, "Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget(), "Heavy suspended impact target");
+            AddCatalogAction(props.DropDownItems, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), "Detonates from fire, shock or impact");
+            AddCatalogAction(props.DropDownItems, "Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder(), "Generic metal cylinder");
+            AddCatalogAction(props.DropDownItems, "Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall(), "Light bouncy ball that bursts when hit hard or set on fire");
+            AddCatalogAction(props.DropDownItems, "Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder(), "Smaller explosive pressure vessel");
+            AddCatalogAction(props.DropDownItems, "Glass bottle", "bottle.png", "", () => _gl.SpawnBottle(), "Fragile glass bottle that shatters");
+            AddCatalogAction(props.DropDownItems, "Firework rocket", "firework.png", "", () => _gl.SpawnFireworkRocket(), "Ignite to launch, then it bursts into sparks");
 
             var mechanisms = CatalogCategory("Mechanisms");
             AddCatalogAction(mechanisms.DropDownItems, "Motor hinge", "motor.png", "", () => _gl.SpawnMotor(), "Rotating actuator");
@@ -1351,6 +1354,15 @@ namespace MakarovPhysicsSandbox
             AddCatalogAction(mechanisms.DropDownItems, "Piston actuator", "piston.png", "", () => _gl.SpawnPiston(), "Pushes bodies along a short stroke");
             AddCatalogAction(mechanisms.DropDownItems, "Sliding door", "door.png", "", () => _gl.SpawnSlidingDoor(), "Toggleable sliding blocker");
 
+            var fields = CatalogCategory("Fields & actions");
+            AddCatalogAction(fields.DropDownItems, "Explosion", "explosion.png", "E", () => _gl.Detonate(), "Place an explosion at the aim point");
+            AddCatalogAction(fields.DropDownItems, "Ignite", "torch.png", "I", () => _gl.Ignite(), "Set a body or place area on fire");
+            AddCatalogAction(fields.DropDownItems, "Electrify", "electricity.png", "D", () => _gl.Electrify(), "Shock a body or conductive chain");
+            AddCatalogAction(fields.DropDownItems, "Water", "water.png", "V", () => _gl.Water(), "Toggle water volume");
+            AddCatalogAction(fields.DropDownItems, "Attractor", "attractor.png", "Z", () => _gl.Attractor(), "Place an attraction field");
+            AddCatalogAction(fields.DropDownItems, "Repeller", "repeller.png", "X", () => _gl.Repeller(), "Place a repulsion field");
+            AddCatalogAction(fields.DropDownItems, "Wind", "wind.png", "U", () => _gl.Wind(), "Place a directional wind field");
+
             var wiring = CatalogCategory("Links & editing");
             AddCatalogAction(wiring.DropDownItems, "Connect objects", "connect.png", "J", () => _gl.Connect(), "Rigid point link between two bodies");
             AddCatalogAction(wiring.DropDownItems, "Spring link", "spring.png", "K", () => _gl.Spring(), "Spring connection between bodies");
@@ -1359,8 +1371,9 @@ namespace MakarovPhysicsSandbox
             items.Add(basic);
             items.Add(dummies);
             items.Add(structures);
-            items.Add(hazards);
+            items.Add(props);
             items.Add(mechanisms);
+            items.Add(fields);
             items.Add(wiring);
         }
 
