@@ -6,7 +6,7 @@ using MakarovPhysicsSandbox.Material;
 
 namespace MakarovPhysicsSandbox;
 
-internal sealed partial class GlPanel
+public sealed partial class GlPanel
 {
     private List<SceneMechanismDto> CreateMechanismDtos()
     {

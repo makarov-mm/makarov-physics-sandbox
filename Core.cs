@@ -15,7 +15,7 @@ namespace MakarovPhysicsSandbox;
 /// no separate Win32 window and no blocking message pump anymore - that was the bug in the
 /// first integration (the engine's old Run() opened a second window and froze the form).
 /// </summary>
-internal sealed partial class GlPanel : Control
+public sealed partial class GlPanel : Control
 {
     // ---- WGL extension delegates (resolved through a throwaway context) ----
     private delegate bool WglChoosePixelFormatARBDel(
@@ -285,7 +285,6 @@ internal sealed partial class GlPanel : Control
     public void Spawn(int kind) { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SpawnBody, kind); Focus(); } }
     public void SpawnPins()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.BowlingPins); Focus(); } }
     public void SpawnChain()    { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Chain); Focus(); } }
-    public void SpawnRagdoll()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ragdoll); Focus(); } }
     public void SpawnAndroid()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Android); Focus(); } }
     public void SpawnVehicle()  { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Vehicle); Focus(); } }
     public void SpawnPoliceVehicle() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.PoliceVehicle); Focus(); } }
@@ -360,8 +359,8 @@ internal sealed partial class GlPanel : Control
 
     public void ApplySelectedBodyProperties(SelectedBodyProperties props)
     {
-        if (_selectedBody == null) return;
-        var b = _selectedBody;
+        if (_selectedBody is null) return;
+        RigidBody? b = _selectedBody;
         b.Position = props.Position;
         b.Velocity = props.IsStatic ? Vector3.Zero : props.Velocity;
         b.Color = Vector3.Clamp(props.Color, Vector3.Zero, Vector3.One);

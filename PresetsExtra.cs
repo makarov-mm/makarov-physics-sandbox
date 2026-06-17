@@ -22,7 +22,7 @@ namespace MakarovPhysicsSandbox;
 //    AddBrickTower / AddPyramidTower - stacked breakable structures
 //    _triggers.Add(new SceneTrigger { Outputs = ... }) - wired pressure plates
 // =====================================================================================
-internal sealed partial class GlPanel
+public sealed partial class GlPanel
 {
     // ---- Explosive Domino: ignite one end, the whole row chain-detonates. fire -> explosive -> blast. ----
     private void BuildExplosiveDomino()

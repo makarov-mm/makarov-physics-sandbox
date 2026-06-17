@@ -787,44 +787,10 @@ namespace MakarovPhysicsSandbox
                 Padding = new Padding(2),
             };
 
-            AddPlayerButton("Sphere", "sphere.png", "1", () => _gl.Spawn(1));
-            AddPlayerButton("Box", "box.png", "2", () => _gl.Spawn(2));
-            AddPlayerButton("Metal cube", "metalcube.png", "", () => _gl.SpawnMetalCube());
-            AddPlayerButton("Glass cube", "glass.png", "", () => _gl.SpawnGlassCube());
-            AddPlayerButton("Plank", "plank.png", "4", () => _gl.Spawn(4));
-            AddPlayerButton("Pillar", "pillar.png", "5", () => _gl.Spawn(5));
-            AddPlayerButton("Dumbbell", "dumbbell.png", "6", () => _gl.Spawn(6));
-            AddPlayerButton("Hammer", "hammer.png", "7", () => _gl.Spawn(7));
-            AddPlayerButton("Table", "table.png", "8", () => _gl.Spawn(8));
-            AddPlayerButton("Bowling pins", "pins.png", "9", () => _gl.SpawnPins());
-            AddPlayerButton("Chain", "chain.png", "L", () => _gl.SpawnChain());
-            AddPlayerButton("Android dummy", "android.png", "0", () => _gl.SpawnAndroid());
-            AddPlayerButton("Drone target", "drone.png", "", () => _gl.SpawnDroneTarget());
-            AddPlayerButton("Target dummy", "sentinel.png", "", () => _gl.SpawnSentinelBot());
-            AddPlayerButton("Vehicle", "vehicle.png", "N", () => _gl.SpawnVehicle());
-            AddPlayerButton("Police car", "police.png", "", () => _gl.SpawnPoliceVehicle());
-            AddPlayerButton("Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance());
-            AddPlayerButton("Bridge span", "bridge.png", "", () => _gl.SpawnBridgeSpan());
-            AddPlayerButton("Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher());
-            AddPlayerButton("Wooden cart", "cart.png", "", () => _gl.SpawnWoodenCart());
-            AddPlayerButton("Glass block", "glass.png", "", () => _gl.SpawnGlassBlock());
-            AddPlayerButton("Glass pyramid", "glass.png", "", () => _gl.SpawnGlassPyramid());
-            AddPlayerButton("Spike platform", "spikepad.png", "", () => _gl.SpawnSpikePlatform());
-            AddPlayerButton("Fire platform", "firepad.png", "", () => _gl.SpawnFirePlatform());
-            AddPlayerButton("Smoke platform", "smokepad.png", "", () => _gl.SpawnSmokePlatform());
-            AddPlayerButton("Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget());
-            AddPlayerButton("Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel());
-            AddPlayerButton("Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder());
-            AddPlayerButton("Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall());
-            AddPlayerButton("Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder());
-            AddPlayerButton("Glass bottle", "bottle.png", "", () => _gl.SpawnBottle());
-            AddPlayerButton("Firework rocket", "firework.png", "", () => _gl.SpawnFireworkRocket());
-            AddPlayerButton("Motor hinge", "motor.png", "", () => _gl.SpawnMotor());
-            AddPlayerButton("Gate", "gate.png", "", () => _gl.SpawnGate());
-            AddPlayerButton("Timer", "timer.png", "", () => _gl.SpawnTimer());
-            AddPlayerButton("Conveyor belt", "conveyor.png", "", () => _gl.SpawnConveyor());
-            AddPlayerButton("Piston actuator", "piston.png", "", () => _gl.SpawnPiston());
-            AddPlayerButton("Sliding door", "door.png", "", () => _gl.SpawnSlidingDoor());
+            foreach (PhysicObjectMenuItem physicObjectMenuItem in PhysicObjectMenuGenerator.Generate(_gl))
+            {
+                AddPlayerButton(physicObjectMenuItem.Text, physicObjectMenuItem.Icon, physicObjectMenuItem.Shortcut, physicObjectMenuItem.Callback);
+            }
 
             BuildPlayerTopBar();
             BuildPlayerPresetPanel();
@@ -1140,51 +1106,13 @@ namespace MakarovPhysicsSandbox
             _startTestButton = AddToolbarButton(ts, "Start vertical slice test", "start.png", "F8", StartVerticalSliceTest);
             ts.Items.Add(new ToolStripSeparator());
 
-            AddToolbarButton(ts, "Sphere",       "sphere.png",   "1",        () => _gl.Spawn(1), placeOnScene: true);
-            AddToolbarButton(ts, "Box",          "box.png",      "2",        () => _gl.Spawn(2), placeOnScene: true);
-            AddToolbarButton(ts, "Metal cube",   "metalcube.png", "",        () => _gl.SpawnMetalCube(), placeOnScene: true);
-            AddToolbarButton(ts, "Glass cube",   "glass.png",     "",        () => _gl.SpawnGlassCube(), placeOnScene: true);
-            AddToolbarButton(ts, "Plank",        "plank.png",    "4",        () => _gl.Spawn(4), placeOnScene: true);
-            AddToolbarButton(ts, "Pillar",       "pillar.png",   "5",        () => _gl.Spawn(5), placeOnScene: true);
-            AddToolbarButton(ts, "Dumbbell",     "dumbbell.png", "6",        () => _gl.Spawn(6), placeOnScene: true);
-            AddToolbarButton(ts, "Hammer",       "hammer.png",   "7",        () => _gl.Spawn(7), placeOnScene: true);
-            AddToolbarButton(ts, "Table",        "table.png",    "8",        () => _gl.Spawn(8), placeOnScene: true);
-            AddToolbarButton(ts, "Bowling pins", "pins.png",     "9",        () => _gl.SpawnPins(), placeOnScene: true);
-            AddToolbarButton(ts, "Chain",        "chain.png",    "L",        () => _gl.SpawnChain(), placeOnScene: true);
-            AddToolbarButton(ts, "Android dummy", "android.png", "0", () => _gl.SpawnAndroid(), placeOnScene: true);
-            AddToolbarButton(ts, "Drone target",   "drone.png",   "",  () => _gl.SpawnDroneTarget(), placeOnScene: true);
-            AddToolbarButton(ts, "Target dummy", "sentinel.png", "", () => _gl.SpawnSentinelBot(), placeOnScene: true);
-            AddToolbarButton(ts, "Vehicle",       "vehicle.png", "N", () => _gl.SpawnVehicle(), placeOnScene: true);
-            AddToolbarButton(ts, "Police car", "police.png", "", () => _gl.SpawnPoliceVehicle(), placeOnScene: true);
-            AddToolbarButton(ts, "Ambulance", "ambulance.png", "", () => _gl.SpawnAmbulance(), placeOnScene: true);
-            AddToolbarButton(ts, "Bridge span",   "bridge.png",  "",  () => _gl.SpawnBridgeSpan(), placeOnScene: true);
-            AddToolbarButton(ts, "Catapult launcher", "catapult.png", "", () => _gl.SpawnCatapultLauncher(), placeOnScene: true);
-            AddToolbarButton(ts, "Wooden cart", "cart.png", "", () => _gl.SpawnWoodenCart(), placeOnScene: true);
-            AddToolbarButton(ts, "Glass block", "glass.png", "", () => _gl.SpawnGlassBlock(), placeOnScene: true);
-            AddToolbarButton(ts, "Glass pyramid", "glass.png", "", () => _gl.SpawnGlassPyramid(), placeOnScene: true);
-            AddToolbarButton(ts, "Spike platform", "spikepad.png", "", () => _gl.SpawnSpikePlatform(), placeOnScene: true);
-            AddToolbarButton(ts, "Fire platform", "firepad.png", "", () => _gl.SpawnFirePlatform(), placeOnScene: true);
-            AddToolbarButton(ts, "Smoke platform", "smokepad.png", "", () => _gl.SpawnSmokePlatform(), placeOnScene: true);
-            AddToolbarButton(ts, "Wrecking ball target", "wreckingball.png", "", () => _gl.SpawnWreckingBallTarget(), placeOnScene: true);
-            AddToolbarButton(ts, "Explosive barrel", "barrel.png", "", () => _gl.SpawnExplosiveBarrel(), placeOnScene: true);
-            AddToolbarButton(ts, "Cylinder", "cylinder.png", "", () => _gl.SpawnCylinder(), placeOnScene: true);
-            AddToolbarButton(ts, "Beach ball", "beachball.png", "", () => _gl.SpawnBeachBall(), placeOnScene: true);
-            AddToolbarButton(ts, "Gas cylinder", "gascylinder.png", "", () => _gl.SpawnGasCylinder(), placeOnScene: true);
-            AddToolbarButton(ts, "Glass bottle", "bottle.png", "", () => _gl.SpawnBottle(), placeOnScene: true);
-            AddToolbarButton(ts, "Firework rocket", "firework.png", "", () => _gl.SpawnFireworkRocket(), placeOnScene: true);
-            AddToolbarButton(ts, "Motor hinge",   "motor.png",   "",  () => _gl.SpawnMotor(), placeOnScene: true);
-            AddToolbarButton(ts, "Gate",          "gate.png",    "",  () => _gl.SpawnGate(), placeOnScene: true);
-            AddToolbarButton(ts, "Timer",         "timer.png",   "",  () => _gl.SpawnTimer(), placeOnScene: true);
-            AddToolbarButton(ts, "Conveyor belt", "conveyor.png", "", () => _gl.SpawnConveyor(), placeOnScene: true);
-            AddToolbarButton(ts, "Piston actuator", "piston.png", "", () => _gl.SpawnPiston(), placeOnScene: true);
-            AddToolbarButton(ts, "Sliding door", "door.png", "", () => _gl.SpawnSlidingDoor(), placeOnScene: true);
+            foreach (PhysicObjectMenuItem physicObjectMenuItem in PhysicObjectMenuGenerator.Generate(_gl))
+            {
+                AddToolbarButton(ts, physicObjectMenuItem.Text, physicObjectMenuItem.Icon, physicObjectMenuItem.Shortcut, physicObjectMenuItem.Callback, placeOnScene: true);
+            }
 
             ts.Items.Add(new ToolStripSeparator());
 
-            AddToolbarButton(ts, "Shoot ball",   "shoot.png",     "Space / F", () => _gl.Shoot());
-            AddToolbarButton(ts, "Explosion",    "explosion.png", "E",         () => _gl.Detonate(), placeOnScene: true);
-            AddToolbarButton(ts, "Ignite",       "torch.png",     "I",         () => _gl.Ignite(), placeOnScene: true);
-            AddToolbarButton(ts, "Electrify",    "electricity.png", "D",       () => _gl.Electrify(), placeOnScene: true);
             _waterButton = AddToolbarButton(ts, "Water",          "water.png",     "V", () => _gl.Water(), checkable: true);
             _attractorButton = AddToolbarButton(ts, "Attractor",  "attractor.png", "Z", () => _gl.Attractor(), checkable: true, placeOnScene: true);
             _repellerButton = AddToolbarButton(ts, "Repeller",    "repeller.png",  "X", () => _gl.Repeller(), checkable: true, placeOnScene: true);

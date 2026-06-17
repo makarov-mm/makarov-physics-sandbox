@@ -7,7 +7,7 @@ using MakarovPhysicsSandbox.Physics;
 
 namespace MakarovPhysicsSandbox;
 
-internal sealed partial class GlPanel
+public sealed partial class GlPanel
 {
     private static readonly JsonSerializerOptions SceneJsonOptions = new()
     {

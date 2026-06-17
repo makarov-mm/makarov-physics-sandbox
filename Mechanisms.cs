@@ -6,7 +6,7 @@ using MakarovPhysicsSandbox.Material;
 
 namespace MakarovPhysicsSandbox;
 
-internal sealed partial class GlPanel
+public sealed partial class GlPanel
 {
     private readonly List<SceneMechanism> _mechanisms = new();
     public void SpawnMotor() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Motor); Focus(); } }
