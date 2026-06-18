@@ -621,6 +621,12 @@ internal sealed class PhysicsWorld
 
     private void AddContact(RigidBody a, RigidBody b, Vector3 point, Vector3 normalAtoB, float penetration)
     {
+        // One-way debris: fracture debris (DebrisLife >= 0) is pushed around by the world and by big bodies,
+        // but it never pushes a non-debris body, and debris does not collide with other debris. This stops
+        // big piles of shards from turning into a churning mush and shoving the real objects around.
+        bool aDebris = a.DebrisLife >= 0f, bDebris = b.DebrisLife >= 0f;
+        if (aDebris && bDebris) return;   // debris ignores debris entirely
+
         // a sleeping body only wakes if the thing touching it actually approaches with
         // some speed; a resting contact must NOT wake it, or stacks would keep each
         // other awake forever and sleeping would be useless
@@ -634,7 +640,13 @@ internal sealed class PhysicsWorld
                 sleeper.Wake();
         }
 
-        _contacts.Add(new Contact { A = a, B = b, Point = point, Normal = normalAtoB, Penetration = penetration });
+        // If exactly one side is debris, the other (the solid body) is immovable for this contact,
+        // so only the debris responds.
+        _contacts.Add(new Contact
+        {
+            A = a, B = b, Point = point, Normal = normalAtoB, Penetration = penetration,
+            SkipA = bDebris, SkipB = aDebris,
+        });
     }
 
     // ---- vs ground plane (y = 0) ----
@@ -1101,12 +1113,12 @@ internal sealed class PhysicsWorld
     private static float EffectiveMass(Contact c, Vector3 dir)
     {
         float k = 1e-6f;
-        if (!c.A.Inactive)
+        if (!c.A.Inactive && !c.SkipA)
         {
             var raCrossD = Vector3.Cross(c.RA, dir);
             k += c.A.InvMass + Vector3.Dot(Vector3.Cross(c.A.InvInertiaWorld.Transform(raCrossD), c.RA), dir);
         }
-        if (!c.B.Inactive)
+        if (!c.B.Inactive && !c.SkipB)
         {
             var rbCrossD = Vector3.Cross(c.RB, dir);
             k += c.B.InvMass + Vector3.Dot(Vector3.Cross(c.B.InvInertiaWorld.Transform(rbCrossD), c.RB), dir);
@@ -1159,12 +1171,12 @@ internal sealed class PhysicsWorld
         dP = c.Pnb - old;
 
         var impulse = n * dP;
-        if (!c.A.Inactive)
+        if (!c.A.Inactive && !c.SkipA)
         {
             c.A.BiasVelocity -= impulse * c.A.InvMass;
             c.A.BiasAngularVelocity -= c.A.InvInertiaWorld.Transform(Vector3.Cross(c.RA, impulse));
         }
-        if (!c.B.Inactive)
+        if (!c.B.Inactive && !c.SkipB)
         {
             c.B.BiasVelocity += impulse * c.B.InvMass;
             c.B.BiasAngularVelocity += c.B.InvInertiaWorld.Transform(Vector3.Cross(c.RB, impulse));
@@ -1175,12 +1187,12 @@ internal sealed class PhysicsWorld
     {
         // sleeping bodies are treated as static here; if the hit was hard enough
         // to matter, AddContact has already woken them up
-        if (!c.A.Inactive)
+        if (!c.A.Inactive && !c.SkipA)
         {
             c.A.Velocity -= impulse * c.A.InvMass;
             c.A.AngularVelocity -= c.A.InvInertiaWorld.Transform(Vector3.Cross(c.RA, impulse));
         }
-        if (!c.B.Inactive)
+        if (!c.B.Inactive && !c.SkipB)
         {
             c.B.Velocity += impulse * c.B.InvMass;
             c.B.AngularVelocity += c.B.InvInertiaWorld.Transform(Vector3.Cross(c.RB, impulse));

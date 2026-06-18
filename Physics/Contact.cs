@@ -16,4 +16,5 @@ public sealed class Contact
     public float Pn, Pt1, Pt2; // accumulated impulses
     public float Pnb; // accumulated position-correction impulse
     public float ImpactSpeed; // closing speed at first touch, for spark effects
+    public bool SkipA, SkipB; // treat that body as immovable for this contact (one-way debris)
 }

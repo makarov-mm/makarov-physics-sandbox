@@ -4,6 +4,11 @@ namespace MakarovPhysicsSandbox
 {
     public partial class MakarovPhysicsSandbox : Form
     {
+        // The standalone editor mode has been retired; the product ships PlayMode only.
+        // Editor-only UI construction is gated behind this flag so the dead code can be
+        // deleted in a later pass without risking a half-removed build in the meantime.
+        private const bool EditorEnabled = false;
+
         private GlPanel _gl = null!;
         private ObjectPropertiesPanel _properties = null!;
         private TriggerPropertiesPanel _triggerProperties = null!;
@@ -92,6 +97,8 @@ namespace MakarovPhysicsSandbox
             _gl.StateChanged += () => { UpdateToolbarState(); UpdateResultOverlay(); };
             _gl.HelpRequested += ShowHelp;
 
+            if (EditorEnabled)
+            {
             _properties = new ObjectPropertiesPanel { Dock = DockStyle.Fill };
             _triggerProperties = new TriggerPropertiesPanel { Dock = DockStyle.Fill };
             _propertyTabs = new TabControl { Dock = DockStyle.Right, Width = 315, Padding = new Point(10, 5) };
@@ -128,6 +135,7 @@ namespace MakarovPhysicsSandbox
 
             _menu = BuildMenu();
             _tools = BuildToolbar();
+            }
 
             _statusStrip = new StatusStrip();
             _status = new ToolStripStatusLabel("Ready — Q select · M move · O rotate · S scale · 1–9 spawn · E explosion · H help")
@@ -137,7 +145,7 @@ namespace MakarovPhysicsSandbox
             };
             _statusStrip.Items.Add(_status);
 
-            BuildFullscreenHud();
+            if (EditorEnabled) BuildFullscreenHud();
             BuildPlayerControls();
             BuildStartScreen();
             BuildPlayMenu();
@@ -149,28 +157,30 @@ namespace MakarovPhysicsSandbox
             // by reverse z-order, so this leaves the GL panel filling the space between
             // the toolbar on top and the status bar on the bottom.
             Controls.Add(_gl);
-            Controls.Add(_propertyTabs);
-            Controls.Add(_tools);
+            if (EditorEnabled) Controls.Add(_propertyTabs);
+            if (EditorEnabled) Controls.Add(_tools);
             Controls.Add(_statusStrip);
-            Controls.Add(_menu);
-            Controls.Add(_hudBottom);
-            Controls.Add(_hudTop);
+            if (EditorEnabled) Controls.Add(_menu);
+            if (EditorEnabled) Controls.Add(_hudBottom);
+            if (EditorEnabled) Controls.Add(_hudTop);
             Controls.Add(_playerControls);
             Controls.Add(_playerTopBar);
             Controls.Add(_playerPresetPanel);
             Controls.Add(_startOverlay);
             Controls.Add(_playMenu);
             Controls.Add(_resultOverlay);
-            _hudTop.BringToFront();
-            _hudBottom.BringToFront();
+            if (EditorEnabled) { _hudTop.BringToFront(); _hudBottom.BringToFront(); }
             _playerControls.BringToFront();
             _playerTopBar.BringToFront();
             _playerPresetPanel.BringToFront();
             _startOverlay.BringToFront();
             _playMenu.BringToFront();
             _resultOverlay.BringToFront();
-            MainMenuStrip = _menu;
-            ApplyPolishedTheme(_menu, _tools, _statusStrip);
+            if (EditorEnabled)
+            {
+                MainMenuStrip = _menu;
+                ApplyPolishedTheme(_menu, _tools, _statusStrip);
+            }
             SetFullscreenHudVisible(false);
             SetPlayerControlsVisible(false);
             SetStartOverlayVisible(false);
@@ -288,7 +298,8 @@ namespace MakarovPhysicsSandbox
                 _status.Text = $"Preset loaded: {_launchOptions.Preset}";
             }
 
-            if (_launchOptions.PlayMode && !_isFullscreen)
+            // Editor retired: always boot straight into the PlayMode player view.
+            if (!_isFullscreen)
                 ToggleFullscreen();
 
             if (_launchOptions.ShowStartScreen)
@@ -1719,14 +1730,14 @@ namespace MakarovPhysicsSandbox
                 _previousBorderStyle = FormBorderStyle;
                 _previousBounds = Bounds;
                 _previousWindowState = WindowState;
-                _propertyTabsVisibleBeforeFullscreen = _propertyTabs.Visible;
+                if (_propertyTabs != null) _propertyTabsVisibleBeforeFullscreen = _propertyTabs.Visible;
                 WindowState = FormWindowState.Normal;
                 FormBorderStyle = FormBorderStyle.None;
                 Bounds = Screen.FromControl(this).Bounds;
-                _menu.Visible = false;
-                _tools.Visible = false;
-                _statusStrip.Visible = false;
-                _propertyTabs.Visible = false;
+                if (_menu != null) _menu.Visible = false;
+                if (_tools != null) _tools.Visible = false;
+                if (_statusStrip != null) _statusStrip.Visible = false;
+                if (_propertyTabs != null) _propertyTabs.Visible = false;
                 _isFullscreen = true;
                 ShowPlayMenu();   // land on the player start screen, not straight into the scene
                 _status.Text = "Fullscreen play view enabled. Player GUI is active; press F11 to return to the editor layout.";
@@ -1736,10 +1747,10 @@ namespace MakarovPhysicsSandbox
                 FormBorderStyle = _previousBorderStyle;
                 Bounds = _previousBounds;
                 WindowState = _previousWindowState;
-                _menu.Visible = true;
-                _tools.Visible = true;
-                _statusStrip.Visible = true;
-                _propertyTabs.Visible = _propertyTabsVisibleBeforeFullscreen;
+                if (_menu != null) _menu.Visible = true;
+                if (_tools != null) _tools.Visible = true;
+                if (_statusStrip != null) _statusStrip.Visible = true;
+                if (_propertyTabs != null) _propertyTabs.Visible = _propertyTabsVisibleBeforeFullscreen;
                 _isFullscreen = false;
                 SetPlayMenuVisible(false);
                 SetFullscreenHudVisible(false);

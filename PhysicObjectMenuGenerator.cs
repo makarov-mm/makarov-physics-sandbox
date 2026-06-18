@@ -27,6 +27,7 @@ public static class PhysicObjectMenuGenerator
             new("Catapult launcher", "catapult.png", "", () => glPanel.SpawnCatapultLauncher()),
             new("Wooden cart", "cart.png", "", () => glPanel.SpawnWoodenCart()),
             new("Ramp", "ramp.png", "", () => glPanel.SpawnRamp()),
+            new("Glass block", "glass.png", "", () => glPanel.SpawnGlassBlock()),
             new("Glass pyramid", "glass.png", "", () => glPanel.SpawnGlassPyramid()),
             new("Spike platform", "spikepad.png", "", () => glPanel.SpawnSpikePlatform()),
             new("Fire platform", "firepad.png", "", () => glPanel.SpawnFirePlatform()),
