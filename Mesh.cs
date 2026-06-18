@@ -183,6 +183,40 @@ internal sealed class Mesh
         return new Mesh(vertices.ToArray(), idx.ToArray());
     }
 
+    // Unit right-triangular prism: flat base on y=0 spanning x,z in [-1,1], vertical back at x=-1
+    // rising to y=1, sloping down to y=0 at x=+1. Scale at draw time. Caller disables culling.
+    public static Mesh CreateWedge()
+    {
+        var v = new List<float>();
+        var idx = new List<uint>();
+        void T(Vector3 a, Vector3 b, Vector3 c, Vector3 n)
+        {
+            uint s = (uint)(v.Count / 8);
+            foreach (var p in new[] { a, b, c })
+            {
+                v.Add(p.X); v.Add(p.Y); v.Add(p.Z);
+                v.Add(n.X); v.Add(n.Y); v.Add(n.Z);
+                v.Add(0.5f + p.X * 0.5f); v.Add(0.5f + p.Z * 0.5f);
+            }
+            idx.Add(s); idx.Add(s + 1); idx.Add(s + 2);
+        }
+
+        var a0 = new Vector3(-1, 0, -1); var a1 = new Vector3(-1, 0, 1);
+        var b0 = new Vector3( 1, 0, -1); var b1 = new Vector3( 1, 0, 1);
+        var c0 = new Vector3(-1, 1, -1); var c1 = new Vector3(-1, 1, 1);
+
+        var nBase = new Vector3(0, -1, 0);
+        T(a0, b0, b1, nBase); T(a0, b1, a1, nBase);                       // base
+        var nBack = new Vector3(-1, 0, 0);
+        T(a0, a1, c1, nBack); T(a0, c1, c0, nBack);                       // vertical back
+        var nSlope = Vector3.Normalize(new Vector3(1, 2, 0));
+        T(c0, c1, b1, nSlope); T(c0, b1, b0, nSlope);                     // slope (hypotenuse)
+        T(a0, c0, b0, new Vector3(0, 0, -1));                             // side -z
+        T(a1, b1, c1, new Vector3(0, 0, 1));                              // side +z
+
+        return new Mesh(v.ToArray(), idx.ToArray());
+    }
+
     // Unit cone: base ring at y = -1 (radius 1), apex at y = +1. Scale it at draw time.
     // Used for spike-platform spikes; backface culling is disabled by the caller so winding is not critical.
     public static Mesh CreateCone(int sectors = 18)

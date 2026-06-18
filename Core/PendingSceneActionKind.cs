@@ -44,5 +44,8 @@ public enum PendingSceneActionKind
     FirePlatform,
     SmokePlatform,
     Bottle,
-    FireworkRocket
+    FireworkRocket,
+    Ramp,
+    Cannon,
+    FireCannon
 }

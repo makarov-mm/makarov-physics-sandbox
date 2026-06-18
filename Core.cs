@@ -89,7 +89,7 @@ public sealed partial class GlPanel : Control
 
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
-    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _coneMesh = null!, _planeMesh = null!, _waterMesh = null!, _quadMesh = null!;
+    private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _coneMesh = null!, _wedgeMesh = null!, _planeMesh = null!, _waterMesh = null!, _quadMesh = null!;
     private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal, _texBeachBall, _texMetalCube, _texGasCylinder, _texSoftParticle;
     private uint _bumpCrate, _bumpBrick, _bumpCartWood, _bumpRustyMetal, _bumpBall, _bumpBowlingPin, _bumpGlass, _bumpVehicle, _bumpTire, _bumpBarrel, _bumpBeachBall, _bumpMetalCube, _bumpGasCylinder;
     private uint _shadowFbo, _shadowTex;
@@ -308,6 +308,9 @@ public sealed partial class GlPanel : Control
     public void SpawnSmokePlatform() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.SmokePlatform); Focus(); } }
     public void SpawnBottle() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Bottle); Focus(); } }
     public void SpawnFireworkRocket() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.FireworkRocket); Focus(); } }
+    public void SpawnRamp() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ramp); Focus(); } }
+    public void SpawnCannon() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Cannon); Focus(); } }
+    public void SpawnFireCannon() { if (_initialized) { ArmSceneAction(PendingSceneActionKind.FireCannon); Focus(); } }
     public void Ignite()        { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Ignite); Focus(); } }
     public void Electrify()     { if (_initialized) { ArmSceneAction(PendingSceneActionKind.Electrify); Focus(); } }
     public void Shoot()         { if (_initialized) { CancelPendingSceneAction(); ShootBall(); Focus(); } }
@@ -625,6 +628,7 @@ public sealed partial class GlPanel : Control
         UpdateMaterialReactions(simDt);
         UpdateHazardPlatforms(simDt);
         UpdateFireworks(simDt);
+        UpdateCannons(simDt);
         UpdateDroneHover(simDt);
         SpawnFireEffects(simDt);
         SpawnElectricityEffects(simDt);
@@ -983,6 +987,7 @@ public sealed partial class GlPanel : Control
         _capsuleMesh = Mesh.CreateCapsule();
         _cylinderMesh = Mesh.CreateCylinder();
         _coneMesh = Mesh.CreateCone();
+        _wedgeMesh = Mesh.CreateWedge();
         _planeMesh = Mesh.CreatePlane();
         _waterMesh = Mesh.CreateGridPlane(64);
         _quadMesh = Mesh.CreateBillboardQuad();
@@ -1128,14 +1133,19 @@ public sealed partial class GlPanel : Control
         }
         void Dummy(Vector3 at)
         {
-            var d = WithMaterial(RigidBody.CreateCompound(at + new Vector3(0, 0.46f, 0), [
-                ChildShape.Sphere(0.42f, new Vector3(0f, -0.10f, 0f)),
-                ChildShape.Sphere(0.30f, new Vector3(0f,  0.42f, 0f)),
-                ChildShape.Sphere(0.20f, new Vector3(0f,  0.86f, 0f)),
-            ], density: 1.15f), MaterialId.Synthetic);
+            var d = WithMaterial(RigidBody.CreateCompound(at, [
+                ChildShape.Box(new Vector3(0.12f, 0.05f, 0.17f), new Vector3(-0.17f, 0.05f, 0.02f)),
+                ChildShape.Box(new Vector3(0.12f, 0.05f, 0.17f), new Vector3( 0.17f, 0.05f, 0.02f)),
+                ChildShape.Box(new Vector3(0.075f, 0.24f, 0.075f), new Vector3(-0.15f, 0.34f, 0f)),
+                ChildShape.Box(new Vector3(0.075f, 0.24f, 0.075f), new Vector3( 0.15f, 0.34f, 0f)),
+                ChildShape.Box(new Vector3(0.21f, 0.28f, 0.13f), new Vector3(0f, 0.86f, 0f)),
+                ChildShape.Box(new Vector3(0.06f, 0.22f, 0.06f), new Vector3(-0.30f, 0.92f, 0f)),
+                ChildShape.Box(new Vector3(0.06f, 0.22f, 0.06f), new Vector3( 0.30f, 0.92f, 0f)),
+                ChildShape.Sphere(0.15f, new Vector3(0f, 1.32f, 0f)),
+            ], density: 1.1f), MaterialId.Synthetic);
             d.Tag = "SentinelBot"; d.Color = new Vector3(0.92f, 0.30f, 0.26f);
-            d.Restitution = 0.22f; d.Friction = 0.62f;
-            d.Breakable = true; d.BreakThreshold = 6.0f; d.BreakPieces = 10;
+            d.Restitution = 0.12f; d.Friction = 0.7f;
+            d.Breakable = true; d.BreakThreshold = 6.0f; d.BreakPieces = 12;
             _world.Bodies.Add(d);
         }
 
@@ -1874,13 +1884,17 @@ public sealed partial class GlPanel : Control
         float supportY = center.Y + 0.45f;
         float zEdge = width * 0.42f;
 
-        var left = RigidBody.CreateStaticBox(center + new Vector3(-supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f));
+        var left = WithMaterial(RigidBody.CreateBox(center + new Vector3(-supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f), density: 4.5f), MaterialId.Stone);
         left.Color = new Vector3(0.25f, 0.27f, 0.30f);
         left.Tag = "BridgeSupport";
+        left.Friction = 0.92f; left.Restitution = 0.03f;
+        left.Breakable = true; left.BreakThreshold = 16f; left.BreakPieces = 14;
         _world.Bodies.Add(left);
-        var right = RigidBody.CreateStaticBox(center + new Vector3(supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f));
+        var right = WithMaterial(RigidBody.CreateBox(center + new Vector3(supportX, supportY, 0f), new Vector3(0.55f, 0.45f, width * 0.72f), density: 4.5f), MaterialId.Stone);
         right.Color = new Vector3(0.25f, 0.27f, 0.30f);
         right.Tag = "BridgeSupport";
+        right.Friction = 0.92f; right.Restitution = 0.03f;
+        right.Breakable = true; right.BreakThreshold = 16f; right.BreakPieces = 14;
         _world.Bodies.Add(right);
 
         for (int i = 0; i < plankCount; i++)
@@ -2497,6 +2511,8 @@ public sealed partial class GlPanel : Control
         EvictIfFull();
         var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.72f, 0f);
         var vehicle = MakeVehicle(p, 1.0f);
+        if (vehicle.Bodies.Count > 0)
+            vehicle.Bodies[0].Color = new Vector3(0.80f, 0.16f, 0.14f);   // red car instead of blank white
         foreach (var b in vehicle.Bodies) _world.Bodies.Add(b);
         foreach (var j in vehicle.Joints) _world.Joints.Add(j);
         StatusUpdated?.Invoke("Spawned vehicle test rig.");
@@ -2613,26 +2629,32 @@ public sealed partial class GlPanel : Control
     private void SpawnSentinelBotAtAim()
     {
         EvictIfFull();
-        // Target dummy: a bottom-heavy "weeble". The big dense base sphere keeps the centre of mass
-        // low so it wobbles back upright when knocked, and it can be smashed or blown apart.
+        // Target dummy: an android-like humanoid built as ONE rigid body, so it cannot flop apart like a
+        // ragdoll. Two flat feet set wide apart give a broad support base, so it stands stably when placed,
+        // yet can still be knocked over, smashed or blown apart. Feet rest on the ground at the aim point.
         float ay = _aimValid ? _aimPoint.Y : 0f;
-        var p = new Vector3(_aimValid ? _aimPoint.X : 0f, ay + 0.46f, _aimValid ? _aimPoint.Z : 0f);
+        var p = new Vector3(_aimValid ? _aimPoint.X : 0f, ay, _aimValid ? _aimPoint.Z : 0f);
         var dummy = WithMaterial(RigidBody.CreateCompound(p, [
-            ChildShape.Sphere(0.42f, new Vector3(0f, -0.10f, 0f)),   // heavy rounded base (most of the mass, low)
-            ChildShape.Sphere(0.30f, new Vector3(0f,  0.42f, 0f)),   // torso
-            ChildShape.Sphere(0.20f, new Vector3(0f,  0.86f, 0f)),   // head
-        ], density: 1.15f), MaterialId.Synthetic);
+            ChildShape.Box(new Vector3(0.12f, 0.05f, 0.17f), new Vector3(-0.17f, 0.05f, 0.02f)),   // left foot
+            ChildShape.Box(new Vector3(0.12f, 0.05f, 0.17f), new Vector3( 0.17f, 0.05f, 0.02f)),   // right foot
+            ChildShape.Box(new Vector3(0.075f, 0.24f, 0.075f), new Vector3(-0.15f, 0.34f, 0f)),    // left leg
+            ChildShape.Box(new Vector3(0.075f, 0.24f, 0.075f), new Vector3( 0.15f, 0.34f, 0f)),    // right leg
+            ChildShape.Box(new Vector3(0.21f, 0.28f, 0.13f), new Vector3(0f, 0.86f, 0f)),          // torso
+            ChildShape.Box(new Vector3(0.06f, 0.22f, 0.06f), new Vector3(-0.30f, 0.92f, 0f)),      // left arm
+            ChildShape.Box(new Vector3(0.06f, 0.22f, 0.06f), new Vector3( 0.30f, 0.92f, 0f)),      // right arm
+            ChildShape.Sphere(0.15f, new Vector3(0f, 1.32f, 0f)),                                   // head
+        ], density: 1.1f), MaterialId.Synthetic);
         dummy.Tag = "SentinelBot";
-        dummy.Color = new Vector3(0.92f, 0.30f, 0.26f);             // red target so it reads as a thing to hit
-        dummy.Restitution = 0.22f;
-        dummy.Friction = 0.62f;
+        dummy.Color = new Vector3(0.92f, 0.30f, 0.26f);
+        dummy.Restitution = 0.12f;
+        dummy.Friction = 0.7f;
         dummy.Breakable = true;
         dummy.BreakThreshold = 6.0f;
-        dummy.BreakPieces = 10;
+        dummy.BreakPieces = 12;
         dummy.Conductivity = 0.4f;
         dummy.Flammability = 0.25f;
         _world.Bodies.Add(dummy);
-        StatusUpdated?.Invoke("Placed target dummy. Bottom-heavy: knock it and it wobbles back; smash or blow it apart.");
+        StatusUpdated?.Invoke("Placed target dummy. It stands on its own legs; knock it over, smash it or blow it apart.");
     }
 
     private void SpawnBridgeSpanAtAim()
@@ -2767,6 +2789,71 @@ public sealed partial class GlPanel : Control
         StatusUpdated?.Invoke("Placed firework rocket. Ignite it to launch, then it bursts.");
     }
 
+    // Shared ramp dimensions, used by both the collider build and the wedge render so they stay aligned.
+    private const float RampHalfL = 1.4f, RampH = 1.2f, RampHalfD = 1.0f, RampT = 0.16f;
+
+    private void SpawnRampAtAim()
+    {
+        EvictIfFull();
+        var p = _aimValid ? _aimPoint : Vector3.Zero;        // base sits on the ground at the aim point
+        float theta = MathF.Atan2(RampH, 2f * RampHalfL);
+        float slopeLen = MathF.Sqrt(4f * RampHalfL * RampHalfL + RampH * RampH);
+        var n = Vector3.Normalize(new Vector3(RampH, 2f * RampHalfL, 0f));   // outward slope normal
+        var boxHalf = new Vector3(slopeLen * 0.5f, RampT, RampHalfD);
+        var boxOffset = new Vector3(0f, RampH * 0.5f, 0f) - n * RampT;       // box top face lies on the hypotenuse
+        var boxRot = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -theta);
+
+        var ramp = new RigidBody
+        {
+            Children = [ChildShape.Box(boxHalf, boxOffset, boxRot)],
+            Position = p,
+            BoundingRadius = boxOffset.Length() + boxHalf.Length() + 0.1f,
+            Restitution = 0.05f,
+            Friction = 0.7f,
+            UserObject = false,
+            Tag = "Ramp",
+            Color = new Vector3(0.58f, 0.52f, 0.42f),
+        };
+        ramp.Proxies = new ShapeProxy[1];
+        ramp.SetStatic(true);
+        _world.Bodies.Add(ramp);
+        StatusUpdated?.Invoke("Placed ramp.");
+    }
+
+    private const float CannonBarrelAngle = 0.40f;   // barrel elevation in radians (~23 degrees)
+
+    private RigidBody AddCannon(string tag, Vector3 color)
+    {
+        var p = (_aimValid ? _aimPoint : Vector3.Zero) + new Vector3(0f, 0.25f, 0f);
+        var barrelRot = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, CannonBarrelAngle);
+        var c = WithMaterial(RigidBody.CreateCompound(p, [
+            ChildShape.Box(new Vector3(0.34f, 0.12f, 0.26f), new Vector3(0f, -0.06f, 0f)),                  // carriage
+            ChildShape.Box(new Vector3(0.42f, 0.10f, 0.10f), new Vector3(0.16f, 0.16f, 0f), barrelRot),     // barrel, elevated
+        ], density: 4.0f), MaterialId.Metal);
+        c.Tag = tag;
+        c.Color = color;
+        c.Friction = 0.85f;
+        c.Restitution = 0.05f;
+        c.Flammability = 1.0f;     // the Ignite tool fires it
+        c.Breakable = false;
+        _world.Bodies.Add(c);
+        return c;
+    }
+
+    private void SpawnCannonAtAim()
+    {
+        EvictIfFull();
+        AddCannon("Cannon", new Vector3(0.22f, 0.24f, 0.28f));
+        StatusUpdated?.Invoke("Placed cannon. Rotate it to aim, then Ignite to fire a cannonball.");
+    }
+
+    private void SpawnFireCannonAtAim()
+    {
+        EvictIfFull();
+        AddCannon("FireCannon", new Vector3(0.34f, 0.16f, 0.10f));
+        StatusUpdated?.Invoke("Placed fire cannon. Rotate it to aim, then Ignite to launch a fireball.");
+    }
+
     private void SpawnWreckingBallTargetAtAim()
     {
         EvictIfFull();
@@ -2887,21 +2974,23 @@ public sealed partial class GlPanel : Control
 
     private void AddCatapultLauncher(Vector3 p, Vector3 projectileVelocity)
     {
-        // Single editable compound launcher. The old catapult consisted of several static bodies,
-        // so selecting/moving/scaling it only affected one part. This version edits as one object.
+        // Single editable compound launcher that the player can grab, move and rotate. It is dynamic
+        // (not static) so it responds to the editor and to the grab tool; the heavy wide base is centred,
+        // and the wheels sit flush with the base underside so it rests flat and stays put rather than
+        // tipping onto its rear wheels.
         var launcher = WithMaterial(RigidBody.CreateCompound(p + new Vector3(0f, 0.58f, 0f), [
             ChildShape.Box(new Vector3(1.35f, 0.18f, 0.62f), new Vector3(0f, -0.38f, 0f)),
             ChildShape.Box(new Vector3(1.85f, 0.07f, 0.17f), new Vector3(0.65f, 0.24f, 0f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -0.18f)),
             ChildShape.Box(new Vector3(0.38f, 0.055f, 0.32f), new Vector3(2.35f, 0.50f, 0f), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -0.18f)),
             ChildShape.Box(new Vector3(0.12f, 0.44f, 0.16f), new Vector3(-0.78f, -0.06f, -0.42f)),
             ChildShape.Box(new Vector3(0.12f, 0.44f, 0.16f), new Vector3(-0.78f, -0.06f,  0.42f)),
-            ChildShape.Sphere(0.16f, new Vector3(-0.85f, -0.50f, -0.45f)),
-            ChildShape.Sphere(0.16f, new Vector3(-0.85f, -0.50f,  0.45f)),
-        ], density: 0.75f), MaterialId.Wood);
+            ChildShape.Sphere(0.16f, new Vector3(-0.85f, -0.40f, -0.45f)),
+            ChildShape.Sphere(0.16f, new Vector3(-0.85f, -0.40f,  0.45f)),
+        ], density: 0.9f), MaterialId.Wood);
         launcher.Tag = "CatapultLauncher";
         launcher.Color = Vector3.One;
-        launcher.SetStatic(true);
-        launcher.RefreshProxies();
+        launcher.Friction = 0.9f;
+        launcher.Restitution = 0.05f;
         _world.Bodies.Add(launcher);
 
         var projectile = WithMaterial(RigidBody.CreateSphere(p + new Vector3(2.35f, 1.55f, 0f), 0.33f, density: 1.6f), MaterialId.Stone);
@@ -2920,8 +3009,8 @@ public sealed partial class GlPanel : Control
     {
         var rig = new VehicleRig();
         var chassis = RigidBody.CreateCompound(pos, [
-            ChildShape.Box(new Vector3(0.95f * k, 0.22f * k, 0.42f * k)),
-            ChildShape.Box(new Vector3(0.45f * k, 0.18f * k, 0.36f * k), new Vector3(-0.10f * k, 0.32f * k, 0f)),
+            ChildShape.Box(new Vector3(1.06f * k, 0.19f * k, 0.42f * k)),                                  // lower, longer body
+            ChildShape.Box(new Vector3(0.46f * k, 0.20f * k, 0.37f * k), new Vector3(-0.08f * k, 0.33f * k, 0f)),   // cabin set toward the rear
         ], density: 1.1f);
         WithMaterial(chassis, MaterialId.Synthetic);
         chassis.Color = new Vector3(1.0f, 1.0f, 1.0f);
@@ -3167,6 +3256,15 @@ public sealed partial class GlPanel : Control
             case PendingSceneActionKind.FireworkRocket:
                 SpawnFireworkRocketAtAim();
                 break;
+            case PendingSceneActionKind.Ramp:
+                SpawnRampAtAim();
+                break;
+            case PendingSceneActionKind.Cannon:
+                SpawnCannonAtAim();
+                break;
+            case PendingSceneActionKind.FireCannon:
+                SpawnFireCannonAtAim();
+                break;
             case PendingSceneActionKind.SentinelBot:
                 SpawnSentinelBotAtAim();
                 break;
@@ -3263,6 +3361,9 @@ public sealed partial class GlPanel : Control
         PendingSceneActionKind.SmokePlatform => "smoke platform",
         PendingSceneActionKind.Bottle => "glass bottle",
         PendingSceneActionKind.FireworkRocket => "firework rocket",
+        PendingSceneActionKind.Ramp => "ramp",
+        PendingSceneActionKind.Cannon => "cannon",
+        PendingSceneActionKind.FireCannon => "fire cannon",
         _ => "tool",
     };
 
@@ -3768,6 +3869,60 @@ public sealed partial class GlPanel : Control
                         0.07f + (float)_rng.NextDouble() * 0.05f, true);
         }
         ApplyExplosionAt(center, 1.6f, 2.0f);   // gentle celebratory pop, not destructive
+        PlayExplosionSound();
+    }
+
+    // Cannons fire when lit with the Ignite tool: one shot per ignition, then the fuse resets.
+    private void UpdateCannons(float dt)
+    {
+        if (dt <= 0f) return;
+        List<RigidBody>? ball = null;
+        List<RigidBody>? fire = null;
+        foreach (var b in _world.Bodies)
+        {
+            if (b.IsStatic || !b.Burning) continue;
+            var tag = b.Tag as string;
+            if (tag == "Cannon") (ball ??= new List<RigidBody>()).Add(b);
+            else if (tag == "FireCannon") (fire ??= new List<RigidBody>()).Add(b);
+        }
+        if (ball != null) foreach (var c in ball) { DoFireCannon(c, false); c.Burning = false; c.Temperature = 20f; }
+        if (fire != null) foreach (var c in fire) { DoFireCannon(c, true); c.Burning = false; c.Temperature = 20f; }
+    }
+
+    private void DoFireCannon(RigidBody c, bool fire)
+    {
+        EvictIfFull();
+        var localDir = new Vector3(MathF.Cos(CannonBarrelAngle), MathF.Sin(CannonBarrelAngle), 0f);
+        var dir = Vector3.Normalize(Vector3.Transform(localDir, c.Rotation));
+        var muzzleLocal = new Vector3(0.16f, 0.16f, 0f) + localDir * 0.5f;
+        var muzzle = c.Position + Vector3.Transform(muzzleLocal, c.Rotation);
+        var spawnPos = muzzle + dir * 0.4f;
+
+        if (fire)
+        {
+            var b = WithMaterial(RigidBody.CreateSphere(spawnPos, 0.16f, density: 1.2f), MaterialId.Synthetic);
+            b.Color = new Vector3(1.0f, 0.45f, 0.12f);
+            b.Flammability = 1.0f;
+            b.Velocity = dir * 20f;
+            _world.Bodies.Add(b);
+            _heat.Ignite(b);
+            for (int i = 0; i < 8; i++)
+                AddParticle(muzzle, dir * (3f + (float)_rng.NextDouble() * 3f) + RandomUnit() * 0.6f,
+                            new Vector3(1f, 0.4f + (float)_rng.NextDouble() * 0.4f, 0.08f), 0.30f, 0.12f, false);
+            c.ApplyImpulse(-dir * 4f, muzzle);
+        }
+        else
+        {
+            var b = WithMaterial(RigidBody.CreateSphere(spawnPos, 0.17f, density: 7.0f), MaterialId.Metal);
+            b.Color = new Vector3(0.12f, 0.12f, 0.13f);
+            b.Velocity = dir * 26f;
+            _world.Bodies.Add(b);
+            for (int i = 0; i < 10; i++)
+                AddParticle(muzzle, dir * (4f + (float)_rng.NextDouble() * 4f) + RandomUnit() * 0.7f,
+                            new Vector3(0.9f, 0.8f, 0.6f), 0.25f, 0.13f, false);
+            c.ApplyImpulse(-dir * 7f, muzzle);
+        }
+        c.Wake();
         PlayExplosionSound();
     }
 
@@ -5119,8 +5274,22 @@ public sealed partial class GlPanel : Control
 
         // bodies
         GL.Uniform1(_uUvScale, 1f);
+        // Two passes so glass renders as real transparency: opaque bodies first (writing depth), then
+        // glass blended over them without writing depth (so you see through it). Depth TEST stays on, so
+        // glass behind solid walls is still correctly hidden.
+        for (int _pass = 0; _pass < 2; _pass++)
+        {
+        if (_pass == 1)
+        {
+            GL.Enable(GL.BLEND);
+            GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+            GL.DepthMask((byte)0);
+            GL.Uniform1(_uAlpha, 0.42f);
+        }
         foreach (var b in _world.Bodies)
         {
+            bool _glass = b.MaterialId == MaterialId.Glass || (b.Tag as string) == "GlassBlock";
+            if ((_glass ? 1 : 0) != _pass) continue;   // pass 0 = opaque, pass 1 = glass
             // sleeping bodies dim slightly so you can see the engine actually sleeps
             var color = b == _selectedBody ? b.Color * 1.55f + new Vector3(0.25f, 0.22f, 0.08f)
                       : b == _world.Grabbed ? b.Color * 1.35f
@@ -5180,6 +5349,11 @@ public sealed partial class GlPanel : Control
                     DrawBowlingPinVisual(b);
                     continue;
                 }
+                if ((b.Tag as string) == "Ramp")
+                {
+                    DrawRampWedge(b);
+                    continue;
+                }
                 GL.BindTexture(GL.TEXTURE_2D, TextureFor(b, in child));
                 uint bumpTex = BumpTextureFor(b, in child);
                 GL.ActiveTexture(GL.TEXTURE2);
@@ -5220,6 +5394,10 @@ public sealed partial class GlPanel : Control
             }
             if ((b.Tag as string) == "SpikePlatform") DrawSpikePlatformSpikes(b);
         }
+        }   // end opaque/transparent pass loop
+        GL.DepthMask((byte)1);
+        GL.Disable(GL.BLEND);
+        GL.Uniform1(_uAlpha, 1f);
         GL.Uniform1(_uEmissive, 0f);
         GL.Uniform1(_uBumpStrength, 0f);
         GL.Uniform1(_uUseBumpMap, 0f);
@@ -5298,6 +5476,32 @@ public sealed partial class GlPanel : Control
         GL.UniformMatrix4(_uModel, ToArray(Matrix4x4.CreateScale(child.Radius * 0.28f) * Matrix4x4.CreateTranslation(center)));
         _sphereMesh.Draw();
 
+        GL.Uniform1(_uUseBumpMap, 0f);
+        GL.Uniform1(_uBumpStrength, 0f);
+    }
+
+    private void DrawRampWedge(RigidBody b)
+    {
+        GL.BindTexture(GL.TEXTURE_2D, _texCrate);
+        GL.ActiveTexture(GL.TEXTURE2);
+        GL.BindTexture(GL.TEXTURE_2D, _bumpCrate);
+        GL.Uniform1(_uUseBumpMap, _bumpCrate != 0 ? 1f : 0f);
+        GL.ActiveTexture(GL.TEXTURE1);
+        GL.Uniform1(_uBumpStrength, 0.25f);
+        GL.Uniform1(_uWorldUv, 0f);
+        GL.Uniform1(_uUvScale, 2f);
+        GL.Uniform1(_uEmissive, 0f);
+        GL.Uniform3(_uColor, b.Color.X, b.Color.Y, b.Color.Z);
+
+        var m = Matrix4x4.CreateScale(RampHalfL, RampH, RampHalfD)
+              * Matrix4x4.CreateFromQuaternion(b.Rotation)
+              * Matrix4x4.CreateTranslation(b.Position);
+        GL.Disable(GL.CULL_FACE);            // wedge mesh is simple; skip winding worries
+        GL.UniformMatrix4(_uModel, ToArray(m));
+        _wedgeMesh.Draw();
+        GL.Enable(GL.CULL_FACE);
+
+        GL.Uniform1(_uUvScale, 1f);
         GL.Uniform1(_uUseBumpMap, 0f);
         GL.Uniform1(_uBumpStrength, 0f);
     }
@@ -6635,12 +6839,15 @@ public sealed partial class GlPanel : Control
                 if (j.B == b && IsChassis(j.A)) { chassis = j.A; offset = j.LocalA; break; }
             }
 
-            // The axle is the chassis-local lateral axis (track is narrower than the wheelbase), rotated
-            // into world space so it turns with the chassis. World-Z was wrong once the cart/car turned.
+            // The axle is the chassis-local lateral axis (perpendicular to the chassis's long horizontal
+            // axis = direction of travel), rotated into world space so it turns with the chassis. Deriving
+            // it from the chassis shape rather than wheel-offset magnitudes fixes carts whose track is wider
+            // than their wheelbase (the old heuristic turned those wheels 90 degrees).
             Vector3 axle;
             if (chassis != null)
             {
-                Vector3 localAxle = MathF.Abs(offset.X) <= MathF.Abs(offset.Z) ? Vector3.UnitX : Vector3.UnitZ;
+                var he = chassis.Children.Length > 0 ? chassis.Children[0].HalfExtents : new Vector3(1f, 1f, 1f);
+                Vector3 localAxle = he.X >= he.Z ? Vector3.UnitZ : Vector3.UnitX;
                 axle = Vector3.Transform(localAxle, chassis.Rotation);
                 if (axle.LengthSquared() > 1e-8f) axle = Vector3.Normalize(axle); else axle = Vector3.UnitZ;
             }
