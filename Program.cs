@@ -2,15 +2,11 @@ namespace MakarovPhysicsSandbox;
 
 internal static class Program
 {
-    /// <summary>
-    ///  The main entry point for the application.
-    /// </summary>
-    [STAThread]
+    // STA is kept so the WinForms Save/Load dialogs and message boxes work; the app itself
+    // runs on a native Win32 window with its own message loop (no Application.Run).
+    [System.STAThread]
     static void Main(string[] args)
     {
-        // To customize application configuration such as set high DPI settings or default font,
-        // see https://aka.ms/applicationconfiguration.
-        ApplicationConfiguration.Initialize();
-        Application.Run(new MakarovPhysicsSandbox(LaunchOptions.Parse(args)));
+        new MakarovPhysicsSandbox(LaunchOptions.Parse(args)).Run();
     }
 }

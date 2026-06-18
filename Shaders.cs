@@ -232,6 +232,47 @@ internal static class Shaders
         }
         """;
 
+    public const string UiVertex = """
+        #version 410 core
+        layout(location = 0) in vec2 aPos;
+        layout(location = 1) in vec2 aUV;
+        layout(location = 2) in vec4 aColor;
+        layout(location = 3) in float aUseTex;
+        uniform float uScreenW;
+        uniform float uScreenH;
+        out vec2 vUV;
+        out vec4 vColor;
+        out float vUseTex;
+        void main()
+        {
+            vUV = aUV; vColor = aColor; vUseTex = aUseTex;
+            float nx = aPos.x / uScreenW * 2.0 - 1.0;
+            float ny = 1.0 - aPos.y / uScreenH * 2.0;   // screen pixels, y down -> NDC
+            gl_Position = vec4(nx, ny, 0.0, 1.0);
+        }
+        """;
+
+    public const string UiFragment = """
+        #version 410 core
+        in vec2 vUV;
+        in vec4 vColor;
+        in float vUseTex;
+        out vec4 FragColor;
+        uniform sampler2D uTex;
+        void main()
+        {
+            if (vUseTex < 0.5)
+                FragColor = vColor;                                         // solid fill
+            else if (vUseTex < 1.5)
+                FragColor = vec4(vColor.rgb, vColor.a * texture(uTex, vUV).a); // glyph coverage
+            else
+            {
+                vec4 t = texture(uTex, vUV);
+                FragColor = vec4(t.rgb * vColor.rgb, t.a * vColor.a);       // full-colour icon
+            }
+        }
+        """;
+
     public const string SkyVertex = """
         #version 410 core
         layout(location = 0) in vec3 aPos;

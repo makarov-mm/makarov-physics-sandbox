@@ -104,4 +104,32 @@ internal static class Win32
     [DllImport("opengl32.dll")] public static extern bool wglDeleteContext(IntPtr hglrc);
     [DllImport("opengl32.dll")] public static extern bool wglMakeCurrent(IntPtr hdc, IntPtr hglrc);
     [DllImport("opengl32.dll", CharSet = CharSet.Ansi)] public static extern IntPtr wglGetProcAddress(string name);
+
+    // ---- native host window: messages, input, sizing ----
+    public const int WM_DESTROY = 0x0002, WM_SIZE = 0x0005, WM_CLOSE = 0x0010, WM_QUIT = 0x0012,
+        WM_KEYDOWN = 0x0100, WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202,
+        WM_RBUTTONDOWN = 0x0204, WM_RBUTTONUP = 0x0205, WM_MBUTTONDOWN = 0x0207, WM_MOUSEWHEEL = 0x020A;
+    public const uint WS_POPUP = 0x80000000, WS_VISIBLE = 0x10000000, WS_OVERLAPPEDWINDOW = 0x00CF0000;
+    public const uint PM_REMOVE = 0x0001;
+    public const int SW_SHOW = 5, SM_CXSCREEN = 0, SM_CYSCREEN = 1, GWL_STYLE = -16;
+    public const uint SWP_NOZORDER = 0x0004, SWP_FRAMECHANGED = 0x0020;
+    public const int VK_CONTROL = 0x11, VK_ESCAPE = 0x1B, VK_F5 = 0x74, VK_F11 = 0x7A, VK_S = 0x53, VK_O = 0x4F;
+    public static readonly IntPtr IDC_ARROW = (IntPtr)32512;
+
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool TranslateMessage(ref MSG msg);
+    [DllImport("user32.dll")] public static extern IntPtr DispatchMessageW(ref MSG msg);
+    [DllImport("user32.dll")] public static extern void PostQuitMessage(int code);
+    [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr SetCapture(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] public static extern short GetKeyState(int vk);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rc);
+    [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hWnd, ref POINT pt);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr LoadCursorW(IntPtr hInstance, IntPtr lpCursorName);
+    [DllImport("user32.dll")] public static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int index, IntPtr newLong);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 }

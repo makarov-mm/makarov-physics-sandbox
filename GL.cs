@@ -37,6 +37,8 @@ internal static class GL
     public const uint TEXTURE1 = 0x84C1;
     public const uint TEXTURE2 = 0x84C2;
     public const uint REPEAT = 0x2901;
+    public const uint CLAMP_TO_EDGE = 0x812F;
+    public const uint SCISSOR_TEST = 0x0C11;
     public const uint LINEAR_MIPMAP_LINEAR = 0x2703;
     public const uint RGBA = 0x1908;
     public const int RGBA8 = 0x8058;
@@ -68,6 +70,8 @@ internal static class GL
     [DllImport("opengl32.dll", EntryPoint = "glCullFace")] public static extern void CullFace(uint mode);
     [DllImport("opengl32.dll", EntryPoint = "glFrontFace")] public static extern void FrontFace(uint mode);
     [DllImport("opengl32.dll", EntryPoint = "glDrawElements")] public static extern void DrawElements(uint mode, int count, uint type, IntPtr indices);
+    [DllImport("opengl32.dll", EntryPoint = "glDrawArrays")] public static extern void DrawArrays(uint mode, int first, int count);
+    [DllImport("opengl32.dll", EntryPoint = "glScissor")] public static extern void Scissor(int x, int y, int width, int height);
     [DllImport("opengl32.dll", EntryPoint = "glGetError")] public static extern uint GetError();
     [DllImport("opengl32.dll", EntryPoint = "glGetString")] public static extern IntPtr GetStringPtr(uint name);
     [DllImport("opengl32.dll", EntryPoint = "glGenTextures")] public static extern void GenTextures(int n, uint[] textures);

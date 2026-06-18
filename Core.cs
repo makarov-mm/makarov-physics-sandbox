@@ -15,7 +15,7 @@ namespace MakarovPhysicsSandbox;
 /// no separate Win32 window and no blocking message pump anymore - that was the bug in the
 /// first integration (the engine's old Run() opened a second window and froze the form).
 /// </summary>
-public sealed partial class GlPanel : Control
+public sealed partial class GlPanel
 {
     // ---- WGL extension delegates (resolved through a throwaway context) ----
     private delegate bool WglChoosePixelFormatARBDel(
@@ -89,6 +89,7 @@ public sealed partial class GlPanel : Control
 
     // ---- rendering ----
     private uint _mainProgram, _depthProgram;
+    private readonly UiRenderer _ui = new();
     private Mesh _cubeMesh = null!, _sphereMesh = null!, _capsuleMesh = null!, _cylinderMesh = null!, _coneMesh = null!, _wedgeMesh = null!, _planeMesh = null!, _waterMesh = null!, _quadMesh = null!;
     private uint _texFloor, _texCrate, _texStripes, _texMetal, _texConcrete, _texBarrel, _texAndroid, _texVehicle, _texTire, _texGlass, _texSky, _texBall, _texBowlingPin, _texBrick, _texCartWood, _texRustyMetal, _texBeachBall, _texMetalCube, _texGasCylinder, _texSoftParticle;
     private uint _bumpCrate, _bumpBrick, _bumpCartWood, _bumpRustyMetal, _bumpBall, _bumpBowlingPin, _bumpGlass, _bumpVehicle, _bumpTire, _bumpBarrel, _bumpBeachBall, _bumpMetalCube, _bumpGasCylinder;
@@ -229,18 +230,20 @@ public sealed partial class GlPanel : Control
 
     public GlPanel()
     {
-        // GL paints every pixel of this control; keep WinForms from drawing the background
-        SetStyle(ControlStyles.UserPaint | ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint, true);
-        SetStyle(ControlStyles.Selectable, true);
-        DoubleBuffered = false;
-        TabStop = true;
-        BackColor = Color.Black;
     }
 
-    protected override void OnHandleCreated(EventArgs e)
+    // Win32 focus + a no-op invalidate (the native host drives a continuous render loop),
+    // so the existing call sites keep working now that GlPanel is not a WinForms Control.
+    public void Focus() { if (_hwnd != IntPtr.Zero) Win32.SetFocus(_hwnd); }
+    private void Invalidate() { }
+
+    // Called once by the native host after the window exists.
+    public void Init(IntPtr hwnd, int width, int height)
     {
-        base.OnHandleCreated(e);
-        if (DesignMode || _initialized) return;
+        if (_initialized) return;
+        _hwnd = hwnd;
+        _width = Math.Max(1, width);
+        _height = Math.Max(1, height);
         InitContext();
         GL.LoadFunctions();
         InitGraphics();
@@ -249,22 +252,16 @@ public sealed partial class GlPanel : Control
         _initialized = true;
     }
 
-    protected override void OnResize(EventArgs e)
+    public void Resize(int width, int height)
     {
-        base.OnResize(e);
         if (!_initialized) return;
-        _width = Math.Max(1, ClientSize.Width);
-        _height = Math.Max(1, ClientSize.Height);
+        _width = Math.Max(1, width);
+        _height = Math.Max(1, height);
         Win32.wglMakeCurrent(_hdc, _hglrc);
         GL.Viewport(0, 0, _width, _height);
-        Invalidate();
     }
 
-    // GL owns the surface, so do nothing here (prevents flicker)
-    protected override void OnPaintBackground(PaintEventArgs e) { }
-    protected override void OnPaint(PaintEventArgs e) { if (_initialized) RenderFrame(); }
-
-    protected override void Dispose(bool disposing)
+    public void Shutdown()
     {
         if (_hglrc != IntPtr.Zero)
         {
@@ -273,8 +270,7 @@ public sealed partial class GlPanel : Control
             _hglrc = IntPtr.Zero;
         }
         if (_hdc != IntPtr.Zero) { Win32.ReleaseDC(_hwnd, _hdc); _hdc = IntPtr.Zero; }
-        if (disposing) Audio.Shutdown();
-        base.Dispose(disposing);
+        Audio.Shutdown();
     }
 
     // ================= public actions (toolbar / menu) =================
@@ -357,30 +353,6 @@ public sealed partial class GlPanel : Control
         _showTriggerWiring = !_showTriggerWiring;
         StatusUpdated?.Invoke(_showTriggerWiring ? "Trigger wiring shown." : "Trigger wiring hidden. Selected trigger wiring remains visible.");
         NotifyStateChanged();
-        Focus();
-    }
-
-    public void ApplySelectedBodyProperties(SelectedBodyProperties props)
-    {
-        if (_selectedBody is null) return;
-        RigidBody? b = _selectedBody;
-        b.Position = props.Position;
-        b.Velocity = props.IsStatic ? Vector3.Zero : props.Velocity;
-        b.Color = Vector3.Clamp(props.Color, Vector3.Zero, Vector3.One);
-        b.Friction = Math.Clamp(props.Friction, 0f, 3f);
-        b.Restitution = Math.Clamp(props.Restitution, 0f, 2f);
-        b.MaterialId = props.MaterialId;
-        b.Density = Math.Clamp(props.Density, 0.001f, 100f);
-        b.Breakable = props.Breakable;
-        b.BreakThreshold = Math.Clamp(props.BreakThreshold, 1f, 50f);
-        b.Flammability = Math.Clamp(props.Flammability, 0f, 1.5f);
-        b.Conductivity = Math.Clamp(props.Conductivity, 0f, 1.5f);
-        b.ExplosivePower = Math.Clamp(props.ExplosivePower, 0f, 5f);
-        b.SetStatic(props.IsStatic);
-        if (!props.IsStatic) b.RecomputeMass(b.Density);
-        b.UpdateDerived();
-        b.Wake();
-        NotifySelectionChanged();
         Focus();
     }
 
@@ -612,11 +584,12 @@ public sealed partial class GlPanel : Control
             if (_cinematicTime < 0f) _cinematicTime = 0f;
         }
 
+        bool frozen = _paused || _overlay != OverlayKind.None;
         if (_stepOnce) { _world.Step(PhysicsWorld.FixedStep); _stepOnce = false; }
-        else if (!_paused) _world.Step(dt * simScale);
+        else if (!frozen) _world.Step(dt * simScale);
         LockWheelAxes();
 
-        float simDt = _paused ? 0f : dt * simScale;
+        float simDt = frozen ? 0f : dt * simScale;
         UpdateMechanisms(simDt);
         UpdateTriggers(simDt);
         UpdateTriggerOutputs(simDt);
@@ -641,6 +614,7 @@ public sealed partial class GlPanel : Control
 
         RenderShadowPass();
         RenderMainPass();
+        RenderUi();
         Win32.SwapBuffers(_hdc);
 
         _frames++;
@@ -657,6 +631,50 @@ public sealed partial class GlPanel : Control
             _frames = 0;
             _fpsTimer = 0;
         }
+
+        Invalidate();   // self-schedule: continuous paint loop even when the mouse is still
+    }
+
+    // Draws the 2D overlay UI on top of the scene. Depth test and face culling are off so quads
+    // always show and winding never matters; alpha blending is on for text and translucent panels.
+    private void RenderUi()
+    {
+        GL.Disable(GL.DEPTH_TEST);
+        GL.Disable(GL.CULL_FACE);
+        GL.Enable(GL.BLEND);
+        GL.BlendFunc(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA);
+
+        _ui.Begin(_width, _height);
+        if (_overlay != OverlayKind.None)
+        {
+            DrawOverlay();
+            _ui.Flush();
+        }
+        else
+        {
+            var sc = CatalogScissor();
+            GL.Enable(GL.SCISSOR_TEST);
+            GL.Scissor(sc.x, sc.y, sc.w, sc.h);
+            DrawCatalog();
+            _ui.Flush();
+            DrawCatalogIcons();
+            GL.Disable(GL.SCISSOR_TEST);
+
+            var ps = PresetScissor();
+            GL.Enable(GL.SCISSOR_TEST);
+            GL.Scissor(ps.x, ps.y, ps.w, ps.h);
+            DrawPresets();
+            _ui.Flush();
+            GL.Disable(GL.SCISSOR_TEST);
+
+            DrawStatusLine();
+            DrawTopMenu();
+            _ui.Flush();
+        }
+
+        GL.Disable(GL.BLEND);
+        GL.Enable(GL.CULL_FACE);
+        GL.Enable(GL.DEPTH_TEST);
     }
 
     // ================= context creation =================
@@ -706,7 +724,6 @@ public sealed partial class GlPanel : Control
         Win32.DestroyWindow(dummyWnd);
 
         // 2) the real surface is THIS control's window
-        _hwnd = Handle;
         _hdc = Win32.GetDC(_hwnd);
 
         // 3) pick an MSAA pixel format on our own DC
@@ -761,9 +778,6 @@ public sealed partial class GlPanel : Control
 
         Win32.wglMakeCurrent(_hdc, _hglrc);
         _wglSwapIntervalEXT?.Invoke(1); // vsync
-
-        _width = Math.Max(1, ClientSize.Width);
-        _height = Math.Max(1, ClientSize.Height);
     }
 
     private static T? LoadWgl<T>(string name) where T : Delegate
@@ -773,16 +787,21 @@ public sealed partial class GlPanel : Control
         return v is 0 or 1 or 2 or 3 or -1 ? null : Marshal.GetDelegateForFunctionPointer<T>(p);
     }
 
-    // ================= input (WinForms events instead of a WndProc) =================
-    // claim the keys we use so they reach OnKeyDown instead of moving focus around
-    protected override bool IsInputKey(Keys keyData) => true;
+    // ================= input (driven by the native host WndProc) =================
 
-    protected override void OnMouseDown(MouseEventArgs e)
+    public void HandleMouseDown(MouseEventArgs e)
     {
-        base.OnMouseDown(e);
         Focus(); // so the panel starts receiving key presses
         _lastMouseX = e.X;
         _lastMouseY = e.Y;
+        if (_overlay != OverlayKind.None)
+        {
+            if (e.Button == MouseButtons.Left) HandleOverlayMouseDown(e.X, e.Y);
+            return;
+        }
+        if (e.Button == MouseButtons.Left && HandleMenuMouseDown(e.X, e.Y)) return;
+        if (e.Button == MouseButtons.Left && HandleCatalogMouseDown(e.X, e.Y)) return;
+        if (e.Button == MouseButtons.Left && HandlePresetMouseDown(e.X, e.Y)) return;
         if (e.Button == MouseButtons.Left)
         {
             if (_pendingSceneAction != PendingSceneActionKind.None)
@@ -806,16 +825,22 @@ public sealed partial class GlPanel : Control
         else if (e.Button == MouseButtons.Right) _rmbDown = true;
     }
 
-    protected override void OnMouseUp(MouseEventArgs e)
+    public void HandleMouseUp(MouseEventArgs e)
     {
-        base.OnMouseUp(e);
+        if (_overlay != OverlayKind.None) return;
         if (e.Button == MouseButtons.Left) { _world.Grabbed = null; _toolDragging = false; }
         else if (e.Button == MouseButtons.Right) _rmbDown = false;
     }
 
-    protected override void OnMouseMove(MouseEventArgs e)
+    public void HandleMouseMove(MouseEventArgs e)
     {
-        base.OnMouseMove(e);
+        if (_overlay != OverlayKind.None)
+        {
+            _lastMouseX = e.X;
+            _lastMouseY = e.Y;
+            Invalidate();
+            return;
+        }
         if (_toolDragging)
             UpdateEditorToolDrag(e.X, e.Y);
         else if (_rmbDown)
@@ -827,9 +852,11 @@ public sealed partial class GlPanel : Control
         _lastMouseY = e.Y;
     }
 
-    protected override void OnMouseWheel(MouseEventArgs e)
+    public void HandleMouseWheel(MouseEventArgs e)
     {
-        base.OnMouseWheel(e);
+        if (_overlay != OverlayKind.None) return;
+        if (HandleCatalogWheel(e.X, e.Y, e.Delta)) return;
+        if (HandlePresetWheel(e.X, e.Y, e.Delta)) return;
         if (_editorTool == EditorToolMode.Scale && _selectedBody != null)
         {
             ScaleSelectedBody(e.Delta > 0 ? 1.08f : 0.92f);
@@ -838,9 +865,9 @@ public sealed partial class GlPanel : Control
         _camDist *= e.Delta > 0 ? 0.9f : 1.1f;
     }
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    public void HandleKeyDown(KeyEventArgs e)
     {
-        base.OnKeyDown(e);
+        if (_overlay != OverlayKind.None) { e.Handled = true; return; }
         HandleKey((int)e.KeyCode);
         e.Handled = true;
     }
@@ -898,6 +925,8 @@ public sealed partial class GlPanel : Control
         GL.Enable(GL.MULTISAMPLE);
 
         _mainProgram = Shaders.Build(Shaders.MainVertex, Shaders.MainFragment);
+        _ui.Init();
+        StatusUpdated += s => _statusText = s;
         // Optional direction-based sky program. If it fails to build, _skyProgram stays 0 and
         // DrawSkybox falls back to the textured cube, so a GLSL issue can never break the renderer.
         try
@@ -4918,19 +4947,19 @@ public sealed partial class GlPanel : Control
 
     private void NotifySelectionChanged()
     {
-        if (!IsHandleCreated || IsDisposed) return;
+        if (!_initialized) return;
         SelectionChanged?.Invoke(CreateSelectedSnapshot());
     }
 
     private void NotifyTriggerSelectionChanged()
     {
-        if (!IsHandleCreated || IsDisposed) return;
+        if (!_initialized) return;
         TriggerSelectionChanged?.Invoke(CreateSelectedTriggerSnapshot());
     }
 
     private void NotifyStateChanged()
     {
-        if (!IsHandleCreated || IsDisposed) return;
+        if (!_initialized) return;
         StateChanged?.Invoke();
     }
 
