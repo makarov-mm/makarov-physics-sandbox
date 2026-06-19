@@ -789,20 +789,20 @@ public sealed partial class GlPanel
 
     // ================= input (driven by the native host WndProc) =================
 
-    public void HandleMouseDown(MouseEventArgs e)
+    public void HandleMouseDown(MouseInput e)
     {
         Focus(); // so the panel starts receiving key presses
         _lastMouseX = e.X;
         _lastMouseY = e.Y;
         if (_overlay != OverlayKind.None)
         {
-            if (e.Button == MouseButtons.Left) HandleOverlayMouseDown(e.X, e.Y);
+            if (e.Button == MouseBtn.Left) HandleOverlayMouseDown(e.X, e.Y);
             return;
         }
-        if (e.Button == MouseButtons.Left && HandleMenuMouseDown(e.X, e.Y)) return;
-        if (e.Button == MouseButtons.Left && HandleCatalogMouseDown(e.X, e.Y)) return;
-        if (e.Button == MouseButtons.Left && HandlePresetMouseDown(e.X, e.Y)) return;
-        if (e.Button == MouseButtons.Left)
+        if (e.Button == MouseBtn.Left && HandleMenuMouseDown(e.X, e.Y)) return;
+        if (e.Button == MouseBtn.Left && HandleCatalogMouseDown(e.X, e.Y)) return;
+        if (e.Button == MouseBtn.Left && HandlePresetMouseDown(e.X, e.Y)) return;
+        if (e.Button == MouseBtn.Left)
         {
             if (_pendingSceneAction != PendingSceneActionKind.None)
             {
@@ -821,18 +821,18 @@ public sealed partial class GlPanel
             else
                 TryStartEditorToolDrag(e.X, e.Y);
         }
-        else if (e.Button == MouseButtons.Middle) ShootBall();
-        else if (e.Button == MouseButtons.Right) _rmbDown = true;
+        else if (e.Button == MouseBtn.Middle) ShootBall();
+        else if (e.Button == MouseBtn.Right) _rmbDown = true;
     }
 
-    public void HandleMouseUp(MouseEventArgs e)
+    public void HandleMouseUp(MouseInput e)
     {
         if (_overlay != OverlayKind.None) return;
-        if (e.Button == MouseButtons.Left) { _world.Grabbed = null; _toolDragging = false; }
-        else if (e.Button == MouseButtons.Right) _rmbDown = false;
+        if (e.Button == MouseBtn.Left) { _world.Grabbed = null; _toolDragging = false; }
+        else if (e.Button == MouseBtn.Right) _rmbDown = false;
     }
 
-    public void HandleMouseMove(MouseEventArgs e)
+    public void HandleMouseMove(MouseInput e)
     {
         if (_overlay != OverlayKind.None)
         {
@@ -852,7 +852,7 @@ public sealed partial class GlPanel
         _lastMouseY = e.Y;
     }
 
-    public void HandleMouseWheel(MouseEventArgs e)
+    public void HandleMouseWheel(MouseInput e)
     {
         if (_overlay != OverlayKind.None) return;
         if (HandleCatalogWheel(e.X, e.Y, e.Delta)) return;
@@ -865,11 +865,10 @@ public sealed partial class GlPanel
         _camDist *= e.Delta > 0 ? 0.9f : 1.1f;
     }
 
-    public void HandleKeyDown(KeyEventArgs e)
+    public void HandleKeyDown(int vk)
     {
-        if (_overlay != OverlayKind.None) { e.Handled = true; return; }
-        HandleKey((int)e.KeyCode);
-        e.Handled = true;
+        if (_overlay != OverlayKind.None) return;
+        HandleKey(vk);
     }
 
     private void HandleKey(int vk)

@@ -2,13 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;   // only for the Save/Load dialogs, MessageBox, and the MouseButtons/Keys enums
 
 namespace MakarovPhysicsSandbox;
 
 // Native Win32 host window. There is no WinForms Form: the window is created with raw Win32
-// and the GL context lives directly on its HDC. WinForms is still referenced only for the
-// Save/Load file dialogs, message boxes, and the MouseButtons/Keys/KeyEventArgs value types.
+// and the GL context lives directly on its HDC. No System.Windows.Forms types are used.
 public partial class MakarovPhysicsSandbox
 {
     private readonly LaunchOptions _launchOptions;
@@ -29,8 +27,8 @@ public partial class MakarovPhysicsSandbox
         _gl = new GlPanel();
         _gl.StateChanged += UpdateResultOverlay;
         _gl.HelpRequested += ShowHelp;
-        _gl.SaveRequested += SaveSceneAs;
-        _gl.LoadRequested += LoadSceneFromFile;
+        _gl.SaveRequested += ShowSaveSlots;
+        _gl.LoadRequested += ShowLoadSlots;
         _gl.MenuRequested += ShowPlayMenu;
         _gl.FullscreenRequested += ToggleFullscreen;
 
@@ -88,12 +86,12 @@ public partial class MakarovPhysicsSandbox
             case Win32.WM_SIZE:
                 _gl?.Resize(LoWord(lParam), HiWord(lParam));
                 return IntPtr.Zero;
-            case Win32.WM_LBUTTONDOWN: Win32.SetCapture(hWnd); _gl?.HandleMouseDown(Mouse(MouseButtons.Left, lParam)); return IntPtr.Zero;
-            case Win32.WM_RBUTTONDOWN: Win32.SetCapture(hWnd); _gl?.HandleMouseDown(Mouse(MouseButtons.Right, lParam)); return IntPtr.Zero;
-            case Win32.WM_MBUTTONDOWN: _gl?.HandleMouseDown(Mouse(MouseButtons.Middle, lParam)); return IntPtr.Zero;
-            case Win32.WM_LBUTTONUP: Win32.ReleaseCapture(); _gl?.HandleMouseUp(Mouse(MouseButtons.Left, lParam)); return IntPtr.Zero;
-            case Win32.WM_RBUTTONUP: Win32.ReleaseCapture(); _gl?.HandleMouseUp(Mouse(MouseButtons.Right, lParam)); return IntPtr.Zero;
-            case Win32.WM_MOUSEMOVE: _gl?.HandleMouseMove(Mouse(MouseButtons.None, lParam)); return IntPtr.Zero;
+            case Win32.WM_LBUTTONDOWN: Win32.SetCapture(hWnd); _gl?.HandleMouseDown(Mouse(MouseBtn.Left, lParam)); return IntPtr.Zero;
+            case Win32.WM_RBUTTONDOWN: Win32.SetCapture(hWnd); _gl?.HandleMouseDown(Mouse(MouseBtn.Right, lParam)); return IntPtr.Zero;
+            case Win32.WM_MBUTTONDOWN: _gl?.HandleMouseDown(Mouse(MouseBtn.Middle, lParam)); return IntPtr.Zero;
+            case Win32.WM_LBUTTONUP: Win32.ReleaseCapture(); _gl?.HandleMouseUp(Mouse(MouseBtn.Left, lParam)); return IntPtr.Zero;
+            case Win32.WM_RBUTTONUP: Win32.ReleaseCapture(); _gl?.HandleMouseUp(Mouse(MouseBtn.Right, lParam)); return IntPtr.Zero;
+            case Win32.WM_MOUSEMOVE: _gl?.HandleMouseMove(Mouse(MouseBtn.None, lParam)); return IntPtr.Zero;
             case Win32.WM_MOUSEWHEEL: _gl?.HandleMouseWheel(Wheel(wParam, lParam)); return IntPtr.Zero;
             case Win32.WM_KEYDOWN: OnKey((int)(long)wParam); return IntPtr.Zero;
             case Win32.WM_CLOSE: Quit(); return IntPtr.Zero;
@@ -104,14 +102,14 @@ public partial class MakarovPhysicsSandbox
 
     private static int LoWord(IntPtr v) => (short)((long)v & 0xFFFF);
     private static int HiWord(IntPtr v) => (short)(((long)v >> 16) & 0xFFFF);
-    private static MouseEventArgs Mouse(MouseButtons b, IntPtr lParam) => new(b, 1, LoWord(lParam), HiWord(lParam), 0);
+    private static MouseInput Mouse(MouseBtn b, IntPtr lParam) => new(b, LoWord(lParam), HiWord(lParam), 0);
 
-    private MouseEventArgs Wheel(IntPtr wParam, IntPtr lParam)
+    private MouseInput Wheel(IntPtr wParam, IntPtr lParam)
     {
         int delta = (short)(((long)wParam >> 16) & 0xFFFF);
         var pt = new Win32.POINT { X = LoWord(lParam), Y = HiWord(lParam) };   // wheel coords are screen-relative
         Win32.ScreenToClient(_hwnd, ref pt);
-        return new(MouseButtons.None, 0, pt.X, pt.Y, delta);
+        return new(MouseBtn.None, pt.X, pt.Y, delta);
     }
 
     private void OnKey(int vk)
@@ -119,21 +117,37 @@ public partial class MakarovPhysicsSandbox
         bool ctrl = (Win32.GetKeyState(Win32.VK_CONTROL) & 0x8000) != 0;
         if (vk == Win32.VK_ESCAPE)
         {
-            if (_gl.PlayMenuOpen) { if (Confirm("Exit Wrecksmith?", "Exit")) Quit(); }
-            else if (_gl.StartOpen) { _gl.HideOverlay(); _gl.Focus(); }
-            else if (Confirm("Return to the main menu? The current sandbox will be reset.", "Return to menu")) ShowPlayMenu();
-            else _gl.Focus();
+            if (_gl.PlayMenuOpen) ShowConfirm("Exit", "Exit Wrecksmith?", Quit, ShowPlayMenu);
+            else if (_gl.OverlayVisible) { _gl.HideOverlay(); _gl.Focus(); }
+            else ShowConfirm("Return to menu", "Return to the main menu?\nThe current sandbox will be reset.", ShowPlayMenu, () => _gl.Focus());
             return;
         }
-        if (ctrl && vk == Win32.VK_S) { SaveSceneAs(); return; }
-        if (ctrl && vk == Win32.VK_O) { LoadSceneFromFile(); return; }
+        if (ctrl && vk == Win32.VK_S) { ShowSaveSlots(); return; }
+        if (ctrl && vk == Win32.VK_O) { ShowLoadSlots(); return; }
         if (vk == Win32.VK_F11) { ToggleFullscreen(); return; }
         if (vk == Win32.VK_F5) { ShowStartScreen(); return; }
-        _gl.HandleKeyDown(new KeyEventArgs((Keys)vk));
+        _gl.HandleKeyDown(vk);
     }
 
-    private static bool Confirm(string text, string caption)
-        => MessageBox.Show(text, caption, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+    // GL modal dialogs (drawn by the overlay system) replace the old native message boxes.
+    private void ShowConfirm(string caption, string message, Action onYes, Action onNo)
+    {
+        var buttons = new List<(string, bool, Action)>
+        {
+            ("Yes", true, () => { _gl.HideOverlay(); onYes?.Invoke(); }),
+            ("No", false, () => { _gl.HideOverlay(); onNo?.Invoke(); }),
+        };
+        _gl.ShowOverlay(OverlayKind.Dialog, caption, message, -1, buttons);
+    }
+
+    private void ShowInfo(string caption, string message)
+    {
+        var buttons = new List<(string, bool, Action)>
+        {
+            ("OK", true, () => { _gl.HideOverlay(); _gl.Focus(); }),
+        };
+        _gl.ShowOverlay(OverlayKind.Dialog, caption, message, -1, buttons);
+    }
 
     private void Quit()
     {
@@ -208,34 +222,68 @@ public partial class MakarovPhysicsSandbox
                         _gl.VerticalSliceStars, buttons);
     }
 
-    // ---- file dialogs (still WinForms) ----
-    private void SaveSceneAs()
+    // ---- save slots (GL screens; no filesystem browsing) ----
+    private const int SaveSlotCount = 6;
+
+    private static string SavesDir()
     {
-        using var dialog = new SaveFileDialog
-        {
-            Title = "Save scene",
-            Filter = "Wrecksmith scene (*.mpscene)|*.mpscene|JSON files (*.json)|*.json|All files (*.*)|*.*",
-            DefaultExt = "mpscene",
-            AddExtension = true,
-            FileName = "sandbox-scene.mpscene",
-        };
-        if (dialog.ShowDialog() != DialogResult.OK) return;
-        try { _gl.SaveScene(dialog.FileName); _gl.Focus(); }
-        catch (Exception ex) { MessageBox.Show(ex.Message, "Could not save scene", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Wrecksmith", "saves");
+        Directory.CreateDirectory(dir);
+        return dir;
     }
 
-    private void LoadSceneFromFile()
+    private static string SlotPath(int i) => Path.Combine(SavesDir(), $"slot{i + 1}.mpscene");
+
+    private static string SlotLabel(int i)
     {
-        using var dialog = new OpenFileDialog
+        string p = SlotPath(i);
+        return File.Exists(p)
+            ? $"Slot {i + 1}   -   {File.GetLastWriteTime(p):yyyy-MM-dd  HH:mm}"
+            : $"Slot {i + 1}   -   empty";
+    }
+
+    private void ShowSaveSlots()
+    {
+        var buttons = new List<(string, bool, Action)>();
+        for (int i = 0; i < SaveSlotCount; i++)
         {
-            Title = "Load scene",
-            Filter = "Wrecksmith scene (*.mpscene)|*.mpscene|JSON files (*.json)|*.json|All files (*.*)|*.*",
-            DefaultExt = "mpscene",
-            CheckFileExists = true,
-        };
-        if (dialog.ShowDialog() != DialogResult.OK) return;
-        try { _gl.LoadScene(dialog.FileName); _gl.Focus(); }
-        catch (Exception ex) { MessageBox.Show(ex.Message, "Could not load scene", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            int slot = i;
+            buttons.Add((SlotLabel(i), false, () => SaveToSlot(slot)));
+        }
+        buttons.Add(("Cancel", true, () => { _gl.HideOverlay(); _gl.Focus(); }));
+        _gl.ShowOverlay(OverlayKind.Dialog, "Save scene", "Pick a slot to save the current scene into.", -1, buttons);
+    }
+
+    private void ShowLoadSlots()
+    {
+        var buttons = new List<(string, bool, Action)>();
+        bool any = false;
+        for (int i = 0; i < SaveSlotCount; i++)
+        {
+            int slot = i;
+            bool exists = File.Exists(SlotPath(i));
+            any |= exists;
+            buttons.Add((SlotLabel(i), false, exists ? () => LoadFromSlot(slot) : null!));   // empty slots are inert
+        }
+        buttons.Add(("Cancel", true, () => { _gl.HideOverlay(); _gl.Focus(); }));
+        string hint = any ? "Pick a slot to load." : "No saved scenes yet.";
+        _gl.ShowOverlay(OverlayKind.Dialog, "Load scene", hint, -1, buttons);
+    }
+
+    private void SaveToSlot(int i)
+    {
+        _gl.HideOverlay();
+        try { _gl.SaveScene(SlotPath(i)); }
+        catch (Exception ex) { ShowInfo("Could not save scene", ex.Message); return; }
+        _gl.Focus();
+    }
+
+    private void LoadFromSlot(int i)
+    {
+        _gl.HideOverlay();
+        try { _gl.LoadScene(SlotPath(i)); }
+        catch (Exception ex) { ShowInfo("Could not load scene", ex.Message); return; }
+        _gl.Focus();
     }
 
     private void ToggleFullscreen()
@@ -258,21 +306,20 @@ public partial class MakarovPhysicsSandbox
 
     private void ShowHelp()
     {
-        MessageBox.Show(
+        ShowInfo("Keyboard controls",
             "Mouse:\n" +
-            "  Left mouse - select/grab an object, or use the active editor tool\n" +
-            "  Right mouse + move - rotate the camera\n" +
-            "  Mouse wheel - zoom; in Scale mode it scales the selected object\n" +
-            "  Middle mouse - shoot a ball\n\n" +
-            "Keyboard:\n" +
+            "  Left - select / grab, or use the active editor tool\n" +
+            "  Right + move - rotate the camera\n" +
+            "  Wheel - zoom; in Scale mode scales the selection\n" +
+            "  Middle - shoot a ball\n" +
+            " \n" +
+            "Keys:\n" +
             "  1-8 objects, 9 bowling pins, L chain, 0 android\n" +
             "  Space/F shoot, E explosion, I ignite, D electrify\n" +
             "  Q select, M move, O rotate, S scale\n" +
             "  Z/X/U attractor/repeller/wind, V water, G gravity\n" +
             "  P pause, T slow motion, B single step\n" +
             "  Ctrl+S / Ctrl+O save/load, F11 fullscreen, F5 title, Esc menu\n" +
-            "  C clear dynamic, R reset, H help",
-            "Keyboard controls", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        _gl.Focus();
+            "  C clear dynamic, R reset, H help");
     }
 }

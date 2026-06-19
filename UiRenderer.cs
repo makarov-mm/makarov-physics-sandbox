@@ -1,8 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 
 namespace MakarovPhysicsSandbox;
 
@@ -58,67 +55,11 @@ internal sealed class UiRenderer
 
     private void BakeFontAtlas(int fontPx)
     {
-        int count = LastChar - FirstChar + 1;
-        int rows = (count + AtlasCols - 1) / AtlasCols;
-
-        using var probe = new Bitmap(8, 8);
-        using var pg = Graphics.FromImage(probe);
-        using var font = new Font("Consolas", fontPx, FontStyle.Regular, GraphicsUnit.Pixel);
-        var fmt = StringFormat.GenericTypographic;
-
-        var widths = new float[count];
-        float maxW = 0f, maxH = 0f;
-        for (int i = 0; i < count; i++)
-        {
-            char c = (char)(FirstChar + i);
-            var s = pg.MeasureString(c.ToString(), font, PointF.Empty, fmt);
-            // MeasureString gives 0 width for space; fall back to a quarter em.
-            float w = c == ' ' ? fontPx * 0.3f : s.Width;
-            widths[i] = w;
-            if (w > maxW) maxW = w;
-            if (s.Height > maxH) maxH = s.Height;
-        }
-
-        _cellW = (int)Math.Ceiling(maxW) + 2;
-        _cellH = (int)Math.Ceiling(maxH) + 2;
-        _glyphH = _cellH - 2;
-        _atlasW = _cellW * AtlasCols;
-        _atlasH = _cellH * rows;
-
-        var px = new byte[_atlasW * _atlasH * 4];
-        using (var bmp = new Bitmap(_atlasW, _atlasH, PixelFormat.Format32bppArgb))
-        {
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.Clear(Color.FromArgb(0, 0, 0, 0));
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-                using var brush = new SolidBrush(Color.White);
-                for (int i = 0; i < count; i++)
-                {
-                    int col = i % AtlasCols, row = i / AtlasCols;
-                    char c = (char)(FirstChar + i);
-                    if (c != ' ')
-                        g.DrawString(c.ToString(), font, brush, col * _cellW + 1, row * _cellH + 1, fmt);
-                    _glyphW[i] = widths[i];
-                    _glyphAdvance[i] = widths[i] + 1f;
-                }
-            }
-
-            var bits = bmp.LockBits(new Rectangle(0, 0, _atlasW, _atlasH), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            Marshal.Copy(bits.Scan0, px, 0, px.Length);
-            bmp.UnlockBits(bits);
-        }
-
-        // GDI+ stores BGRA; we only need the coverage. Force RGB to white and keep alpha as the
-        // glyph mask so the shader can tint freely.
-        for (int i = 0; i < _atlasW * _atlasH; i++)
-        {
-            byte a = px[i * 4 + 3];
-            px[i * 4 + 0] = 255;
-            px[i * 4 + 1] = 255;
-            px[i * 4 + 2] = 255;
-            px[i * 4 + 3] = a;
-        }
+        var px = GdiPlusImage.BakeFontAtlasRgba("Consolas", fontPx, FirstChar, LastChar, AtlasCols,
+            out _cellW, out _cellH, out _atlasW, out _atlasH, out _glyphH,
+            out var glyphW, out var glyphAdvance);
+        Array.Copy(glyphW, _glyphW, _glyphW.Length);
+        Array.Copy(glyphAdvance, _glyphAdvance, _glyphAdvance.Length);
 
         _atlas = GL.GenTexture();
         GL.BindTexture(GL.TEXTURE_2D, _atlas);
@@ -257,19 +198,7 @@ internal sealed class UiRenderer
         {
             if (System.IO.File.Exists(path))
             {
-                using var src = new Bitmap(path);
-                using var bmp = new Bitmap(src, new Size(64, 64));
-                var bits = bmp.LockBits(new Rectangle(0, 0, 64, 64), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                var px = new byte[64 * 64 * 4];
-                Marshal.Copy(bits.Scan0, px, 0, px.Length);
-                bmp.UnlockBits(bits);
-                for (int i = 0; i < 64 * 64; i++)
-                {
-                    byte b = px[i * 4 + 0];
-                    byte r = px[i * 4 + 2];
-                    px[i * 4 + 0] = r;   // BGRA -> RGBA
-                    px[i * 4 + 2] = b;
-                }
+                var px = GdiPlusImage.LoadRgbaScaled(path, 64, 64); // RGBA, 64x64
                 tex = GL.GenTexture();
                 GL.BindTexture(GL.TEXTURE_2D, tex);
                 GL.TexImage2D(GL.TEXTURE_2D, 0, GL.RGBA8, 64, 64, 0, GL.RGBA, GL.UNSIGNED_BYTE, px);

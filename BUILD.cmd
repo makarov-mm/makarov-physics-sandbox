@@ -1,1 +1,1 @@
-dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false /p:IncludeNativeLibrariesForSelfExtract=true /p:DebugType=none /p:DebugSymbols=false -o publish/steam-win64
+dotnet publish -c Release -r win-x64 -o publish/steam-win64 /p:StripSymbols=true /p:InvariantGlobalization=true

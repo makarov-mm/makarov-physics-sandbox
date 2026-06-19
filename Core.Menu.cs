@@ -197,9 +197,9 @@ public sealed partial class GlPanel
     // ---- GL spawn catalog (left panel): grid of square icon tiles ----
     private List<PhysicObjectMenuItem>? _catalogItems;
     private float _catalogScroll;
-    private const float CatX = 8f, CatY = 46f, CatW = 320f, CatTitleH = 30f;
-    private const float CatPadX = 10f, CatTile = 70f, CatGap = 6f, CatRowStride = 78f;
-    private const int CatCols = 4;
+    private const float CatX = 8f, CatY = 46f, CatW = 332f, CatTitleH = 30f;
+    private const float CatPadX = 10f, CatTile = 100f, CatGap = 7f, CatRowStride = 108f;
+    private const int CatCols = 3;
 
     private void EnsureCatalog()
     {
@@ -228,7 +228,7 @@ public sealed partial class GlPanel
         _ui.DrawText(CatX + 12f, CatY + (CatTitleH - th) * 0.5f, "Objects", 0.96f, 0.86f, 0.36f, 1f, MenuScale);
 
         float contentTop = CatY + CatTitleH, contentBottom = CatY + h;
-        const float lblScale = 0.62f;
+        const float lblScale = 0.64f;
         for (int i = 0; i < _catalogItems!.Count; i++)
         {
             var (tx, ty) = CatTilePos(i);
@@ -242,12 +242,47 @@ public sealed partial class GlPanel
             if (hover) _ui.DrawRect(tx + 1f, ty + 1f, CatTile - 2f, CatTile - 2f, 0.26f, 0.33f, 0.42f, 1f);
             else _ui.DrawRect(tx + 1f, ty + 1f, CatTile - 2f, CatTile - 2f, 0.15f, 0.17f, 0.21f, 1f);
 
-            string lbl = _ui.Ellipsize(it.Text, CatTile - 6f, lblScale);
-            float lw = _ui.MeasureText(lbl, lblScale);
-            _ui.DrawText(tx + (CatTile - lw) * 0.5f, ty + CatTile - 16f, lbl, 0.90f, 0.92f, 0.96f, 1f, lblScale);
+            var lines = WrapLabel(it.Text, CatTile - 8f, lblScale, 2);
+            float lh = _ui.LineHeight * lblScale;
+            float ly = ty + CatTile - 7f - lines.Count * lh;
+            for (int k = 0; k < lines.Count; k++)
+            {
+                float lw = _ui.MeasureText(lines[k], lblScale);
+                _ui.DrawText(tx + (CatTile - lw) * 0.5f, ly + k * lh, lines[k], 0.90f, 0.92f, 0.96f, 1f, lblScale);
+            }
             if (!string.IsNullOrEmpty(it.Shortcut))
-                _ui.DrawText(tx + 4f, ty + 3f, it.Shortcut, 0.58f, 0.63f, 0.71f, 1f, 0.6f);
+                _ui.DrawText(tx + 5f, ty + 4f, it.Shortcut, 0.58f, 0.63f, 0.71f, 1f, 0.6f);
         }
+    }
+
+    // Greedy word wrap into at most maxLines lines that fit maxW; the final line is ellipsized.
+    private List<string> WrapLabel(string text, float maxW, float scale, int maxLines)
+    {
+        var lines = new List<string>();
+        var words = text.Split(' ');
+        string cur = "";
+        for (int i = 0; i < words.Length; i++)
+        {
+            string trial = cur.Length == 0 ? words[i] : cur + " " + words[i];
+            if (cur.Length == 0 || _ui.MeasureText(trial, scale) <= maxW)
+            {
+                cur = trial;
+            }
+            else
+            {
+                lines.Add(cur);
+                cur = words[i];
+                if (lines.Count == maxLines - 1)
+                {
+                    for (i++; i < words.Length; i++) cur += " " + words[i];   // dump the rest onto the last line
+                    break;
+                }
+            }
+        }
+        if (cur.Length > 0) lines.Add(cur);
+        if (lines.Count > 0)
+            lines[^1] = _ui.Ellipsize(lines[^1], maxW, scale);
+        return lines;
     }
 
     // Drawn after the catalog text batch is flushed (icons are full-colour, self-flushing quads).
@@ -257,14 +292,14 @@ public sealed partial class GlPanel
         string dir = System.IO.Path.Combine(AppContext.BaseDirectory, "icons");
         float h = CatHeight();
         float contentTop = CatY + CatTitleH, contentBottom = CatY + h;
-        const float iconSz = 34f;
+        const float iconSz = 44f;
         for (int i = 0; i < _catalogItems.Count; i++)
         {
             var (tx, ty) = CatTilePos(i);
             if (ty + CatTile < contentTop || ty > contentBottom) continue;
             var it = _catalogItems[i];
             if (string.IsNullOrEmpty(it.Icon)) continue;
-            _ui.DrawIcon(tx + (CatTile - iconSz) * 0.5f, ty + 7f, iconSz, iconSz, System.IO.Path.Combine(dir, it.Icon));
+            _ui.DrawIcon(tx + (CatTile - iconSz) * 0.5f, ty + 10f, iconSz, iconSz, System.IO.Path.Combine(dir, it.Icon));
         }
     }
 
@@ -402,7 +437,10 @@ public sealed partial class GlPanel
     private string _ovTitle = "", _ovSubtitle = "";
     private int _ovStars = -1;
     private readonly List<(string label, bool primary, Action action)> _ovButtons = new();
-    private const float OvBtnW = 440f, OvBtnH = 46f, OvBtnGap = 12f, OvPanelW = 560f;
+    private const float OvBtnW = 440f, OvBtnH = 46f, OvBtnGap = 12f, OvPanelW = 560f, OvBodyScale = 0.8f;
+
+    private string[] OverlayBodyLines()
+        => _ovSubtitle.Length == 0 ? Array.Empty<string>() : _ovSubtitle.Split('\n');
 
     public bool OverlayVisible => _overlay != OverlayKind.None;
     public bool PlayMenuOpen => _overlay == OverlayKind.PlayMenu;
@@ -428,16 +466,22 @@ public sealed partial class GlPanel
     }
 
     private float OverlayHeaderH()
-        => 22f + _ui.LineHeight * 1.6f + 8f
-         + (_ovSubtitle.Length > 0 ? _ui.LineHeight * 0.85f + 10f : 0f)
-         + (_ovStars >= 0 ? _ui.LineHeight * 1.6f + 12f : 0f)
-         + 10f;
+    {
+        float h = 22f + _ui.LineHeight * 1.6f + 8f;
+        var body = OverlayBodyLines();
+        if (body.Length > 0) h += body.Length * (_ui.LineHeight * OvBodyScale) + 12f;
+        if (_ovStars >= 0) h += _ui.LineHeight * 1.6f + 12f;
+        return h + 10f;
+    }
 
     private (float px, float py, float pw, float ph, float btnTop) OverlayLayout()
     {
         float header = OverlayHeaderH();
         float ph = header + _ovButtons.Count * (OvBtnH + OvBtnGap) + 26f;
         float pw = OvPanelW;
+        foreach (var line in OverlayBodyLines())                       // grow to fit the widest body line
+            pw = Math.Max(pw, _ui.MeasureText(line, OvBodyScale) + 56f);
+        pw = Math.Min(pw, _width - 40f);
         float px = (_width - pw) * 0.5f;
         float py = (_height - ph) * 0.5f;
         return (px, py, pw, ph, py + header);
@@ -459,12 +503,18 @@ public sealed partial class GlPanel
         _ui.DrawText((_width - tw) * 0.5f, yy, _ovTitle, 0.96f, 0.97f, 0.98f, 1f, ts);
         yy += _ui.LineHeight * ts + 8f;
 
-        if (_ovSubtitle.Length > 0)
+        var body = OverlayBodyLines();
+        if (body.Length > 0)
         {
-            float ss = 0.85f;
-            float sw = _ui.MeasureText(_ovSubtitle, ss);
-            _ui.DrawText((_width - sw) * 0.5f, yy, _ovSubtitle, 0.70f, 0.75f, 0.82f, 1f, ss);
-            yy += _ui.LineHeight * ss + 10f;
+            float lh = _ui.LineHeight * OvBodyScale;
+            bool center = body.Length == 1;
+            foreach (var line in body)
+            {
+                float lx = center ? (_width - _ui.MeasureText(line, OvBodyScale)) * 0.5f : L.px + 26f;
+                _ui.DrawText(lx, yy, line, 0.72f, 0.77f, 0.84f, 1f, OvBodyScale);
+                yy += lh;
+            }
+            yy += 12f;
         }
         if (_ovStars >= 0)
         {
@@ -506,4 +556,4 @@ public sealed partial class GlPanel
     }
 }
 
-public enum OverlayKind { None, Start, PlayMenu, Result }
+public enum OverlayKind { None, Start, PlayMenu, Result, Dialog }

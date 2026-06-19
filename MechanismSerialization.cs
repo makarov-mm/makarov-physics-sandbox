@@ -68,7 +68,7 @@ public sealed partial class GlPanel
                 OpenSpeed = dto.OpenSpeed <= 0 ? 1.6f : dto.OpenSpeed,
                 MotorSpeed = dto.MotorSpeed <= 0 ? 5.0f : dto.MotorSpeed,
                 MotorTorque = dto.MotorTorque <= 0 ? 1.0f : dto.MotorTorque,
-                MotorAxis = dto.MotorAxis != null && dto.MotorAxis.LengthSquared() > 1e-6f ? Vector3.Normalize(dto.MotorAxis) : Vector3.UnitX,
+                MotorAxis = dto.MotorAxis.LengthSquared() > 1e-6f ? Vector3.Normalize(dto.MotorAxis) : Vector3.UnitX,
                 Delay = dto.Delay <= 0 ? 1.5f : dto.Delay,
                 Remaining = dto.Remaining <= 0 ? dto.Delay : dto.Remaining,
                 TimerRunning = dto.TimerRunning,

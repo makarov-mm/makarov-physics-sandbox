@@ -85,23 +85,8 @@ internal static class Textures
                 path = Path.Combine("Textures", fileName);
             if (!File.Exists(path)) return fallback();
 
-            using var src = new Bitmap(path);
-            using var bmp = new Bitmap(src.Width, src.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(bmp))
-                g.DrawImage(src, 0, 0, src.Width, src.Height);
-
-            var data = new byte[bmp.Width * bmp.Height * 4];
-            int i = 0;
-            for (int y = 0; y < bmp.Height; y++)
-            for (int x = 0; x < bmp.Width; x++)
-            {
-                var c = bmp.GetPixel(x, y);
-                data[i++] = c.R;
-                data[i++] = c.G;
-                data[i++] = c.B;
-                data[i++] = c.A;
-            }
-            return Upload(data, bmp.Width, bmp.Height);
+            var data = GdiPlusImage.LoadRgba(path, out int w, out int h);
+            return Upload(data, w, h);
         }
         catch
         {

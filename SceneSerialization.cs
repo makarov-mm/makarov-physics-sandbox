@@ -9,12 +9,6 @@ namespace MakarovPhysicsSandbox;
 
 public sealed partial class GlPanel
 {
-    private static readonly JsonSerializerOptions SceneJsonOptions = new()
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
     public void SaveScene(string path)
     {
         var bodyIndex = new Dictionary<RigidBody, int>();
@@ -66,14 +60,14 @@ public sealed partial class GlPanel
             Mechanisms = CreateMechanismDtos(),
         };
 
-        var json = JsonSerializer.Serialize(dto, SceneJsonOptions);
+        var json = JsonSerializer.Serialize(dto, SceneJsonContext.Default.SceneDto);
         File.WriteAllText(path, json);
     }
 
     public void LoadScene(string path)
     {
         var json = File.ReadAllText(path);
-        var dto = JsonSerializer.Deserialize<SceneDto>(json, SceneJsonOptions)
+        var dto = JsonSerializer.Deserialize(json, SceneJsonContext.Default.SceneDto)
                   ?? throw new InvalidDataException("Scene file is empty or invalid.");
 
         CancelPendingSceneAction();

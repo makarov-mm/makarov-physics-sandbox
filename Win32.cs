@@ -6,6 +6,11 @@ namespace MakarovPhysicsSandbox;
 internal static class Win32
 {
     public delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    // Per-monitor-v2 DPI awareness, set from code now that WinForms (ApplicationHighDpiMode) is gone.
+    public static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new(-4);
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
     public const uint CS_OWNDC = 0x0020;
     public const uint PFD_DRAW_TO_WINDOW = 0x00000004;
     public const uint PFD_SUPPORT_OPENGL = 0x00000020;
@@ -132,4 +137,8 @@ internal static class Win32
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr LoadCursorW(IntPtr hInstance, IntPtr lpCursorName);
     [DllImport("user32.dll")] public static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int index, IntPtr newLong);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    public const uint MB_OK = 0x0, MB_YESNO = 0x4, MB_ICONERROR = 0x10, MB_ICONQUESTION = 0x20, MB_ICONINFORMATION = 0x40;
+    public const int IDOK = 1, IDYES = 6, IDNO = 7;
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 }
