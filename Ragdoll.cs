@@ -5,7 +5,7 @@ using MakarovPhysicsSandbox.Material;
 namespace MakarovPhysicsSandbox;
 
 // =====================================================================================
-//  Ragdoll - the core "toy" the 3D People Playground game is built around.
+//  Ragdoll - the articulated dummy the destruction gameplay is built around.
 //
 //  It is built entirely on the primitives the engine already has: plain RigidBody parts
 //  (boxes for the trunk/limbs, a sphere for the head) wired together with the existing

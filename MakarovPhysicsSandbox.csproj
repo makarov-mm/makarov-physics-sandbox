@@ -12,16 +12,12 @@
     <PublishAot>true</PublishAot>
     <!-- The game uses no .resx; don't auto-include any (also ignores stale template files). -->
     <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
-    <ApplicationIcon>Steam\icon.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- ship the toolbar icons and textures next to the exe -->
   <ItemGroup>
-    <Content Include="Steam\icon.ico" />
-  </ItemGroup>
-
-  <!-- ship the toolbar icons next to the exe -->
-  <ItemGroup>
-    <None Update="icons\*.png">
+    <None Update="Icons\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Textures\*.png">

@@ -1,6 +1,6 @@
 # Preset and Mechanism Guide
 
-This document is part of the current Makarov Physics Sandbox prototype. It separates playable/showcase direction from prototype labs.
+This document describes Wrecksmith's mechanisms, triggers and presets. It separates playable/showcase content from internal test labs.
 
 ## Current rule
 

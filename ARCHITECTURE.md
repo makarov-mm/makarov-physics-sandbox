@@ -1,67 +1,55 @@
 # Architecture notes
 
-This project is intentionally kept as a custom C#/.NET + WinForms/OpenGL sandbox rather than a Unity/Unreal/Bullet/PhysX project. The codebase is now large enough that feature work must follow a stricter layout rule.
+This project is intentionally a custom C#/.NET + Win32/OpenGL codebase rather
+than a Unity/Unreal/Bullet/PhysX project. Everything — solver, renderer,
+windowing, UI, audio, image decoding — is written in this repository against
+raw OS APIs.
 
-## Source layout rule
+## Layers
 
-- One data type per file where practical.
-- `GlPanel` may stay a `partial` class for now, but each subsystem must live in a named partial file.
-- New gameplay systems should not be added directly to `Core.cs`.
-- New player-facing objects should be registered through the existing spawn/catalog/UI paths rather than as one-off code hidden in presets.
-- Physical shape and visual shape may differ, but that difference should be explicit and documented in the object creation/drawing code.
-- New user-facing features must be exposed consistently in Dev UI, Player fullscreen UI, help text and README/PRESET_GUIDE when applicable.
+1. **Platform** — `Win32.cs` (window, message loop, DPI), `Input.cs`,
+   `GdiPlus.cs` (PNG decoding via GDI+/WIC), `GL.cs` (OpenGL P/Invoke and
+   extension loading).
+2. **Physics** — everything under `Physics/`. Self-contained; exposes
+   `PhysicsWorld`, `RigidBody`, `Joint`, `ForceField`, `WaterVolume`,
+   `BreakEvent` and an `Impacts` channel. No references to rendering or UI.
+3. **Simulation systems** — `Ragdoll.cs`, `Heat.cs`, `Electricity.cs`,
+   `Mechanisms.cs`, `Material/`. Built only on the public physics API; they
+   never modify the solver.
+4. **Game/editor shell** — `GlPanel` (the big partial class in `Core.cs` +
+   `Core.Menu.cs`) plus its data types under `Core/`, the campaign under
+   `Campaign/`, scene serialization (`SceneSerialization.cs`, `SceneJson.cs`,
+   `Dto/`), presets (`PresetsExtra.cs`), and the app host
+   (`MakarovPhysicsSandbox.cs`, `Program.cs`, `LaunchOptions.cs`).
 
-## Current `GlPanel` split
+## Source layout rules
 
-`Core.cs` now contains the shared fields, constructor, lifecycle, OpenGL context setup, render-frame orchestration and graphics initialization.
+- One data type per file where practical; small `GlPanel`-owned types live
+  under `Core/` (`Particle`, `Beam`, `VehicleRig`, `SceneTrigger`, selection
+  snapshots, enums).
+- `GlPanel` stays a `partial` class; `Core.cs` holds simulation/render
+  orchestration, `Core.Menu.cs` holds the in-engine menu/catalog UI. New
+  gameplay systems should be added as separate files, not appended to
+  `Core.cs`.
+- New player-facing objects must be registered through the existing
+  spawn/catalog/UI paths (`PhysicObjectMenuGenerator.cs`), not hidden as
+  one-off preset code.
+- Physical shape and visual shape may differ, but the difference must be
+  explicit and documented at the object's creation/drawing code.
+- New user-facing features must be exposed consistently in the editor UI, the
+  fullscreen player UI, help text and `README.md`/`PRESET_GUIDE.md` where
+  applicable.
 
-The behavioral parts are split into partial files:
+## Naming note
 
-- `Core/GlPanel.PlayerActions.cs` — public methods called by menus, toolbars, fullscreen player UI and property panels.
-- `Core/GlPanel.Input.cs` — mouse and keyboard dispatch.
-- `Core/GlPanel.PresetsChallenges.cs` — scene reset, presets, challenge and campaign scene builders.
-- `Core/GlPanel.SpawnActions.cs` — object placement, spawn helpers and pending scene actions.
-- `Core/GlPanel.Triggers.cs` — trigger evaluation, graph outputs and triggered actions.
-- `Core/GlPanel.EffectsAudio.cs` — material reactions, particles, beams and audio feedback.
-- `Core/GlPanel.ToolsSelectionCamera.cs` — sandbox tools, water/fields, selection, editor transforms and camera picking.
-- `Core/GlPanel.Rendering.cs` — shadow pass, main pass, skybox, overlays, textures and draw helpers.
+The repository, project files and root namespace use the project's original
+name, `MakarovPhysicsSandbox`. The shipped assembly and product name are
+`Wrecksmith` — the title the game is sold under on Steam.
 
-Small internal data types that belong to `GlPanel` are also split into separate files:
+## Known cleanup targets
 
-- `Core/Particle.cs`
-- `Core/Beam.cs`
-- `Core/VehicleRig.cs`
-- `Core/SceneMechanism.cs`
-
-## Campaign split
-
-Campaign/challenge data was split into `Campaign/`:
-
-- `ChallengeKind.cs`
-- `ChallengeResult.cs`
-- `LevelDef.cs`
-- `LevelCatalog.cs`
-- `CampaignProgress.cs`
-
-This keeps campaign state independent from the main OpenGL control.
-
-## Material split
-
-Material data was split so each type has a single home:
-
-- `Materials/MaterialId.cs`
-- `Materials/MaterialDefinition.cs`
-- `Materials.cs` for the static material registry.
-
-## Known remaining cleanup targets
-
-The project is not finished architecturally. The next cleanup candidates are:
-
-1. `MakarovPhysicsSandbox.cs` — still mixes menu creation, toolbar creation, player fullscreen UI, title overlay and form-level orchestration.
-2. `Mechanisms.cs` — still contains mechanism runtime, drawing, spawning and preset helper logic in one partial file.
-3. `Textures.cs` — should be split into texture loading, procedural fallback generation and texture registry/lookup.
-4. `Audio.cs` — should be split into public sound API and WinMM interop/private voice types.
-5. `Ragdoll.cs` — should eventually split bone data, pose muscles, ragdoll instance and ragdoll system.
-6. Object identity should gradually move away from string `Tag` checks toward an explicit `ObjectKind` field/registry.
-
-The current cleanup is meant to reduce risk before more gameplay/UI work, not to create a perfect architecture in one pass.
+- `Core.cs` is still large (~7000 lines); splitting it into per-subsystem
+  partial files (input, spawning, triggers, rendering) is the next structural
+  pass.
+- `MakarovPhysicsSandbox.cs` still mixes menu creation, toolbar creation,
+  player fullscreen UI, title overlay and form-level orchestration.

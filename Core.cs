@@ -155,7 +155,7 @@ public sealed partial class GlPanel
     private const int MaxBeams = 96;
     private float _impactFlash;
 
-    // ---- ragdolls (the 3D People Playground "toy"; see Ragdoll.cs) ----
+    // ---- ragdolls (articulated dummy system; see Ragdoll.cs) ----
     private readonly RagdollSystem _ragdolls = new();
 
     // ---- fire / heat (first M1 interacting system; see Heat.cs) ----

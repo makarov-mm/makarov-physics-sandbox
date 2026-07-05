@@ -289,7 +289,7 @@ public sealed partial class GlPanel
     private void DrawCatalogIcons()
     {
         if (_catalogItems == null) return;
-        string dir = System.IO.Path.Combine(AppContext.BaseDirectory, "icons");
+        string dir = System.IO.Path.Combine(AppContext.BaseDirectory, "Icons");
         float h = CatHeight();
         float contentTop = CatY + CatTitleH, contentBottom = CatY + h;
         const float iconSz = 44f;
