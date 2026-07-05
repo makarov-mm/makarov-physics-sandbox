@@ -7,9 +7,6 @@ a hand-written sequential-impulse constraint solver, a hand-written OpenGL
 renderer (P/Invoke to `opengl32`), a native Win32 window with its own message
 loop, and GDI+ only for PNG decoding.
 
-The game is available on Steam:
-**https://store.steampowered.com/app/4861360/Wrecksmith/**
-
 ![Wrecksmith screenshot](Docs/screenshot.jpg)
 
 ![Wrecksmith screenshot 2](Docs/screenshot2.jpg)
