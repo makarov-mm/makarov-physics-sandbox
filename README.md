@@ -10,9 +10,9 @@ loop, and GDI+ only for PNG decoding.
 The game is available on Steam:
 **https://store.steampowered.com/app/4861360/Wrecksmith/**
 
-![Wrecksmith screenshot](docs/screenshot.jpg)
+![Wrecksmith screenshot](Docs/screenshot.jpg)
 
-![Wrecksmith screenshot 2](docs/screenshot2.jpg)
+![Wrecksmith screenshot 2](Docs/screenshot2.jpg)
 
 ## What's inside
 
