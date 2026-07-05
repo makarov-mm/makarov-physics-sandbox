@@ -138,3 +138,9 @@ mechanism/trigger gameplay guide.
   reserved, included for building and personal use only — see
   `LICENSE-ASSETS.md`. Don't redistribute builds containing these assets;
   the game itself is sold on Steam.
+
+## Support
+
+If you found this project interesting or useful, you can support my work:
+
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/makarov-mm?style=flat&logo=github)](https://github.com/sponsors/makarov-mm)
